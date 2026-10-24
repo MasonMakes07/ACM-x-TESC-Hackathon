@@ -7,13 +7,14 @@ import streamlit as st
 
 from analysis.current_anomalies import compare_current
 from agents.weather_brief import ACTIONS, explain
+from data import san_diego_heat as heat
 from data.locations import Location, search_locations
 from dashboard.globe import GLOBE_CSS, GLOBE_JS
 
 _HTML = '''
 <div class="stage"><div id="globeViz" role="img" aria-label="Weather comparisons globe; use the location selector for keyboard access"></div>
 <div id="fallback" role="status">Globe unavailable. Use the location selector below.</div>
-<div id="legend"><div>● Coral · historical anomaly &nbsp; ● Mint · within screening range</div>
+<div id="legend"><div>● Red · reported weather anomaly &nbsp; ● Coral · historical anomaly &nbsp; ● Mint · within screening range</div>
 <div>● Gray · not scanned or insufficient history</div><div class="hint">Click a location to open its history · drag to explore</div></div></div>
 '''
 _GLOBE = st.components.v2.component('weather_anomaly_globe', html=_HTML, css=GLOBE_CSS, js=GLOBE_JS)
@@ -48,6 +49,31 @@ DEFAULTS = [Location('San Diego',32.7157,-117.1611), Location('London',51.5074,-
             Location('Mumbai',19.076,72.8777), Location('Tokyo',35.6762,139.6503),
             Location('Sydney',-33.8688,151.2093), Location('Cape Town',-33.9249,18.4241),
             Location('São Paulo',-23.5505,-46.6333)]
+
+
+REPORTED_COLOR = '#e5322d'
+REPORT_SECTIONS = ('What happened', 'Why it happened', 'El Niño connection')
+
+
+def reported_event(place):
+    """The documented anomaly report for a watched place, if one exists within ~25 km."""
+    return heat if abs(place.latitude-heat.LATITUDE) < .25 and abs(place.longitude-heat.LONGITUDE) < .25 else None
+
+
+def render_reported_anomaly(report):
+    st.error('Daily heat records fell across San Diego County in early October 2026. '
+             'This is a documented, source-linked event, separate from the live comparison below.',
+             title='Reported weather anomaly · record heat', icon=':material/local_fire_department:')
+    for section in REPORT_SECTIONS:
+        st.markdown(f"**{'Why it was so hot' if section == 'Why it happened' else section}**")
+        for finding in (f for f in report.FINDINGS if f['section'] == section):
+            st.caption(finding['status'])
+            st.markdown(finding['text'])
+            st.markdown(' · '.join(f"[{report.SOURCES[ref]['title']}]({report.SOURCES[ref]['url']})" for ref in finding['refs']))
+    with st.expander('Impacts and unknowns'):
+        for finding in (f for f in report.FINDINGS if f['section'] not in REPORT_SECTIONS):
+            st.markdown(f"**{finding['status']}** · {finding['text']}")
+    st.caption(f'Sources checked {report.VERIFIED_ON:%d %B %Y}. Airport and station records, not readings for every neighborhood.')
 
 
 def comparison_chart(metric, fahrenheit=False):
@@ -131,23 +157,31 @@ def render_weather_anomalies():
             snap=valid.get(key)
             unusual=bool(snap and any(m.unusual for m in snap.metrics))
             adequate=bool(snap and all(m.historical_mean is not None and m.current is not None for m in snap.metrics))
-            color='#ff827a' if unusual else '#6cd5c3' if adequate else '#94a3b8'
-            points.append(dict(lat=p.latitude,lng=p.longitude,label=p.name,region=p.name,anomaly_id=key,
-                               color=color,radius=.65,tooltip=escape(p.label)))
+            report=reported_event(p)
+            color=REPORTED_COLOR if report else '#ff827a' if unusual else '#6cd5c3' if adequate else '#94a3b8'
+            tooltip=(f'<b>{escape(p.name)} · reported heat anomaly</b><br>Record heat, early October 2026 · click to see why'
+                     if report else escape(p.label))
+            points.append(dict(lat=p.latitude,lng=p.longitude,label=p.name+(' · record heat' if report else ''),region=p.name,
+                               anomaly_id=key,color=color,radius=1.1 if report else .65,tooltip=tooltip))
         def pick():
             key=state['weather_globe'].get('selected')
             if key in places:
                 state.weather_selected=key
         _GLOBE(key='weather_globe',height=700,on_selected_change=pick,data=dict(points=points,outlines=[],
-            rings=[dict(lat=p['lat'],lng=p['lng'],color=p['color'],maxRadius=4) for p in points if p['color']=='#ff827a'],
+            rings=[dict(lat=p['lat'],lng=p['lng'],color=p['color'],maxRadius=4) for p in points if p['color'] in ('#ff827a',REPORTED_COLOR)],
             view=dict(lat=selected.latitude,lng=selected.longitude,altitude=2.5),view_key=selected.key,rotate=False,pulses=True))
         st.selectbox('Open location',list(places),format_func=lambda k:places[k].label,key='weather_selected')
     with right:
         st.subheader(selected.label)
+        report=reported_event(selected)
+        if report:
+            render_reported_anomaly(report)
+            st.divider()
         snapshot=snapshots.get(selected.key)
         if snapshot is None:
             st.info('Scan this location to reveal its current weather, historical comparison, and Grok briefing.')
-            st.caption('For example, 100°F versus a comparable historical mean of 67°F is a +33°F departure. This is an illustration, not a current San Diego reading.')
+            if not report:
+                st.caption('For example, 100°F versus a comparable historical mean of 67°F is a +33°F departure. This is an illustration, not a current San Diego reading.')
             return
         if not fresh(snapshot):
             st.warning('This snapshot is out of date. Scan again before using it for current conditions.')

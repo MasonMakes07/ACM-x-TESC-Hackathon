@@ -49,3 +49,17 @@ def test_default_view_and_snapshot_selection():
     at.selectbox(key='weather_selected').set_value(DEFAULTS[1].key).run()
     assert not at.exception
     assert any('Scan this location' in i.value for i in at.info)
+
+
+def test_san_diego_shows_reported_heat_anomaly_without_a_scan():
+    from dashboard.weather_anomalies import DEFAULTS, REPORTED_COLOR, reported_event
+    assert reported_event(DEFAULTS[0]) is not None and reported_event(DEFAULTS[1]) is None
+    at=AppTest.from_file(__import__('pathlib').Path(__file__).resolve().parents[1] / 'app.py').run()
+    at.sidebar.radio[0].set_value('Weather anomalies').run()
+    assert not at.exception
+    assert any('Reported weather anomaly' in str(item.proto.title) for item in at.error)
+    assert any('ridge of high pressure' in item.value for item in at.markdown)
+    assert any('105°F' in item.value for item in at.markdown)
+    at.selectbox(key='weather_selected').set_value(DEFAULTS[1].key).run()
+    assert not at.exception and not at.error
+    assert REPORTED_COLOR.startswith('#')

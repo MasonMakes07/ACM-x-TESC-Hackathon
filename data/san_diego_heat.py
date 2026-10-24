@@ -16,6 +16,16 @@ SOURCES = {
         'date': '2026-10-05',
         'note': 'The NWS version-number link is a rolling archive. The report cites the dated bulletin reviewed on 24 October, not whatever later replaces that version.',
     },
+    'cbs8-records': {
+        'title': 'CBS 8 · daily heat records shattered across San Diego County, October 2026',
+        'url': 'https://www.cbs8.com/article/weather/severe-weather/san-diego-county-daily-heat-records/509-c3ad5201-16ee-4664-acd9-0d64410e73f8',
+        'date': '2026-10-07',
+    },
+    'patch-records': {
+        'title': 'Patch · record-breaking October heat wave refuses to let go of San Diego County',
+        'url': 'https://patch.com/california/san-diego/record-breaking-october-heat-wave-refuses-let-go-san-diego-county',
+        'date': '2026-10-07',
+    },
     'kpbs-impacts': {
         'title': 'KPBS · county emergency-call reporting, updated 9 October 2026',
         'url': 'https://www.kpbs.org/news/health/2026/10/06/county-data-show-record-heat-related-911-calls-where-and-who-is-calling',
@@ -43,6 +53,10 @@ FINDINGS = [
         'text': 'NWS reported airport highs of 105°F on 3 October and 100°F on 4 October, both daily records. The 4 October low was 74°F. These are airport observations, not readings for every San Diego neighborhood. The 5 October bulletin continued major to locally extreme HeatRisk for coastal areas and western valleys through Thursday.',
     },
     {
+        'section': 'What happened', 'status': 'Reported daily records', 'refs': ['cbs8-records', 'patch-records'],
+        'text': 'CBS 8 reported daily heat records broken on six of the first seven days of October, with San Diego International Airport reaching 105°F on 3 October; record-warm overnight lows were also set. On 5 October Escondido hit 106°F (old record 101°F, 2020), Vista 103°F (98°F, 1987), Chula Vista 99°F (90°F, 2020) and Ramona 101°F (98°F, 2024), while San Diego tied its record at 97°F. Escondido set another record of 105°F on 6 October.',
+    },
+    {
         'section': 'Damage and disruption', 'status': 'Reported impacts', 'refs': ['kpbs-impacts'],
         'text': 'KPBS reported 925 metro-zone dispatch calls on 3 October, a 42% increase, and more than 400 ambulance hospital transports that Saturday. These were all-cause totals during the heat wave; the report does not identify how many were caused by heat. Extra ambulances and longer cooling-center hours were added. Separately, the county had logged 378 heat-related calls by 17 September: a year-to-date figure, not an October-event total.',
     },
@@ -51,8 +65,8 @@ FINDINGS = [
         'text': 'SDG&E described sustained heat, increased cooling demand, and possible localized outages. It also tracked separate dry offshore-wind and wildfire-weather conditions. Its 4 October update ended the potential shutoff alert. The cited update does not quantify heat-caused outages, property losses, or economic damage; high temperatures alone do not trigger preventive fire-weather shutoffs.',
     },
     {
-        'section': 'Why it happened', 'status': 'Local weather mechanism', 'refs': ['sdge', 'nws-local'],
-        'text': 'Dry offshore flow helped hot conditions reach the coastal region; weaker ocean cooling allowed heat to persist. SDG&E documented offshore winds during the heat wave, and NWS described the eventual return of a cooling sea breeze. These local circulation changes help explain the event’s timing and coastal intensity.',
+        'section': 'Why it happened', 'status': 'Local weather mechanism', 'refs': ['patch-records', 'sdge', 'nws-local'],
+        'text': 'A ridge of high pressure parked over Southern California, sinking and warming the air beneath it; forecasters expected relief only as the ridge weakened and low pressure approached later that week. Dry offshore flow helped the heat reach the coast, and weaker ocean cooling allowed it to persist. SDG&E documented offshore winds during the heat wave, and NWS described the eventual return of a cooling sea breeze. These local circulation changes help explain the event’s timing and coastal intensity.',
     },
     {
         'section': 'El Niño connection', 'status': 'Climate influence; event contribution not quantified', 'refs': ['scripps', 'noaa-enso'],
