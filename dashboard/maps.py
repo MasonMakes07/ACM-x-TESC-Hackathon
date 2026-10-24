@@ -1,4 +1,4 @@
-"""Map of monitored Pacific SST regions and northern Peru locations.
+"""World map with monitored Pacific SST regions and northern Peru locations.
 
 Owner: Person 3 (Product & Dashboard).
 """
@@ -27,7 +27,7 @@ def _box_outline(box: tuple[float, float, float, float]) -> tuple[list[float], l
     )
 
 
-# Draws Pacific monitoring regions and labelled northern Peru cities.
+# Draws a global map with Pacific monitoring regions and Peru locations.
 def region_map(selected_region: str | None = None) -> go.Figure:
     figure = go.Figure()
     for name, box in REGION_BOXES.items():
@@ -63,17 +63,22 @@ def region_map(selected_region: str | None = None) -> go.Figure:
         )
     )
     figure.update_geos(
-        projection_type="mercator",
-        center={"lat": -2, "lon": -122},
-        lataxis_range=[-20, 16],
-        lonaxis_range=[-178, -68],
+        scope="world",
+        projection_type="natural earth",
+        center={"lat": 0, "lon": 0},
+        lataxis_range=[-90, 90],
+        lonaxis_range=[-180, 180],
         showland=True,
         landcolor="#263746",
         showocean=True,
         oceancolor="#0C2434",
+        showcountries=True,
+        countrycolor="#526779",
         showcoastlines=True,
         coastlinecolor="#7C92A3",
         showlakes=False,
+        showframe=True,
+        framecolor="#526779",
         bgcolor="rgba(0,0,0,0)",
     )
     figure.update_layout(
@@ -81,6 +86,7 @@ def region_map(selected_region: str | None = None) -> go.Figure:
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
         margin={"l": 0, "r": 0, "t": 0, "b": 0},
+        height=520,
         showlegend=True,
         legend={"orientation": "h", "y": 0, "x": 0},
     )

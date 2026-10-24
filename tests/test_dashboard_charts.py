@@ -112,6 +112,17 @@ def test_region_map_highlights_selected_region() -> None:
     assert set(figure.data[-1].text) == set(PERU_LOCATIONS)
 
 
+# Keeps a global viewport even when a Pacific region is selected.
+@pytest.mark.parametrize("region", [None, "Nino 1+2", "Nino 3.4"])
+def test_region_map_shows_the_whole_world(region: str | None) -> None:
+    geo = region_map(region).layout.geo
+    assert geo.scope == "world"
+    assert geo.projection.type == "natural earth"
+    assert tuple(geo.lataxis.range) == (-90, 90)
+    assert tuple(geo.lonaxis.range) == (-180, 180)
+    assert geo.showcountries
+
+
 # Leaves all regions dim for a missing or unsupported selection.
 @pytest.mark.parametrize("region", [None, "unknown"])
 def test_region_map_unknown_region(region: str | None) -> None:
