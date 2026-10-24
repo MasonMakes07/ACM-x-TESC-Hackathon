@@ -108,7 +108,13 @@ def flag_overreach(statements: Iterable[str]) -> list[SkepticIssue]:
 
 
 # Returns a confidence ceiling based on how complete the gathered evidence is.
-def completeness_cap(ledger: EvidenceLedger) -> ConfidenceLevel:
-    if ledger.unavailable or not ledger.has_official_report():
+# Records judged only against one reanalysis model (no official report is
+# expected) are capped at "moderate", since nothing independent corroborates them.
+def completeness_cap(
+    ledger: EvidenceLedger, requires_official_report: bool = True
+) -> ConfidenceLevel:
+    if ledger.unavailable:
         return "low"
-    return "high"
+    if not requires_official_report:
+        return "moderate"
+    return "high" if ledger.has_official_report() else "low"

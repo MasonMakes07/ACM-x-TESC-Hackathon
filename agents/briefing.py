@@ -7,6 +7,7 @@ final confidence, provenance and limitations are always enforced by code.
 from collections.abc import Iterable
 
 from agents.agent_models import ImpactReport, InvestigationReport, VerificationReport
+from agents.context import AnomalyContext
 from agents.ledger import EvidenceLedger
 from agents.provenance import (
     completeness_cap,
@@ -24,7 +25,15 @@ STANDING_LIMITATION = (
     "EarthWatch identifies unusual conditions and investigates possible "
     "implications; it does not forecast specific floods or issue official warnings."
 )
-DEFAULT_NEXT_STEP = "Review the latest NOAA CPC ENSO Diagnostic Discussion."
+PACIFIC_NEXT_STEP = "Review the latest NOAA CPC ENSO Diagnostic Discussion."
+LOCAL_NEXT_STEP = (
+    "Check the national meteorological service and local hazard authorities "
+    "for this location."
+)
+NO_OFFICIAL_REPORT_LIMITATION = "No official NOAA assessment was retrieved."
+SINGLE_SOURCE_LIMITATION = (
+    "Based on one ERA5 reanalysis grid cell; no independent source corroborates it."
+)
 
 
 # Removes blanks and duplicates while keeping the original order.
@@ -41,18 +50,21 @@ def _qualify(texts: Iterable[str], unresolved: set[str]) -> list[str]:
 
 
 # Assembles the final, code-verified Assessment for the dashboard.
+# A missing context is treated as a Pacific record, which expects NOAA context.
 def build_assessment(
     anomaly: AnomalyRecord,
     investigation: InvestigationReport,
     impact: ImpactReport,
     verification: VerificationReport,
     ledger: EvidenceLedger,
+    context: AnomalyContext | None = None,
 ) -> Assessment:
+    expects_official_report = context is None or context.profile == "pacific"
     unresolved = set(find_overreach(draft_statements(investigation, impact)))
     confidence = lowest_confidence(
         investigation.proposed_confidence,
         verification.confidence_cap,
-        completeness_cap(ledger),
+        completeness_cap(ledger, expects_official_report),
     )
     if verification.verdict == "reject":
         confidence = "inconclusive"
@@ -72,10 +84,11 @@ def build_assessment(
             *(f"Open question: {text}" for text in investigation.open_questions),
             *(f"Missing evidence: {entry}" for entry in ledger.unavailable),
             *(
-                []
-                if ledger.has_official_report()
-                else ["No official NOAA assessment was retrieved."]
+                [NO_OFFICIAL_REPORT_LIMITATION]
+                if expects_official_report and not ledger.has_official_report()
+                else []
             ),
+            *([] if expects_official_report else [SINGLE_SOURCE_LIMITATION]),
             *(
                 ["Statements marked [Unverified] overstate the evidence."]
                 if unresolved
@@ -101,6 +114,10 @@ def build_assessment(
         confidence=confidence,
         limitations=limitations,
         recommended_next_steps=_qualify(
-            [*impact.recommended_next_steps, DEFAULT_NEXT_STEP], unresolved
+            [
+                *impact.recommended_next_steps,
+                PACIFIC_NEXT_STEP if expects_official_report else LOCAL_NEXT_STEP,
+            ],
+            unresolved,
         ),
     )

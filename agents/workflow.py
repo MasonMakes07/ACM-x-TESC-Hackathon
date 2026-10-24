@@ -6,6 +6,7 @@ Every on_progress event corresponds to a real step that just happened.
 """
 
 from agents.briefing import build_assessment
+from agents.context import build_context, infer_as_of_date
 from agents.grok_client import GrokClient
 from agents.investigator import investigate
 from agents.ledger import EvidenceLedger, LedgerSource
@@ -17,8 +18,13 @@ from agents.toolbox import AgentToolbox
 from schemas.anomaly import AnomalyRecord
 from schemas.assessment import Assessment
 
-SENTINEL_NAME = "Ocean Sentinel"
+PACIFIC_SENTINEL_NAME = "Ocean Sentinel"
+LOCAL_SENTINEL_NAME = "Climate Sentinel"
 BRIEFING_NAME = "Briefing"
+UNSUPPORTED_REGION_REASON = (
+    "Record region is neither a supported Pacific index nor a coordinate "
+    "location, so no independent data could be retrieved."
+)
 
 
 # Investigates one anomaly end to end and returns a validated Assessment.
@@ -30,20 +36,23 @@ def run_investigation(
     toolbox: AgentToolbox | None = None,
 ) -> Assessment:
     client = client or GrokClient()
-    toolbox = toolbox or AgentToolbox(EvidenceLedger(), anomaly.observation_date)
+    toolbox = toolbox or AgentToolbox(EvidenceLedger(), infer_as_of_date(anomaly))
     ledger = toolbox.ledger
+    context = build_context(anomaly)
     ledger.record_source(LedgerSource(anomaly.source, "measurement"))
+    if context.profile == "unknown":
+        ledger.record_unavailable("data_tools", UNSUPPORTED_REGION_REASON)
     emit(
         on_progress,
-        SENTINEL_NAME,
-        f"{anomaly.region}: {anomaly.value} {anomaly.unit} on "
-        f"{anomaly.observation_date} ({anomaly.detection_method}, "
+        PACIFIC_SENTINEL_NAME if context.profile == "pacific" else LOCAL_SENTINEL_NAME,
+        f"{context.place}: {anomaly.value} {anomaly.unit} on "
+        f"{anomaly.observation_date} ({anomaly.detection_method[:120]}, "
         f"status {anomaly.status}).",
     )
 
-    investigation = investigate(client, toolbox, anomaly, on_progress)
+    investigation = investigate(client, toolbox, anomaly, on_progress, context)
     impact = assess_regional_impact(
-        client, toolbox, anomaly, investigation, on_progress
+        client, toolbox, anomaly, investigation, on_progress, context
     )
     verification = review(
         client, anomaly, investigation, impact, ledger, on_progress
@@ -58,7 +67,9 @@ def run_investigation(
         )
 
     emit(on_progress, BRIEFING_NAME, "Assembling the verified assessment.")
-    assessment = build_assessment(anomaly, investigation, impact, verification, ledger)
+    assessment = build_assessment(
+        anomaly, investigation, impact, verification, ledger, context
+    )
     emit(
         on_progress,
         BRIEFING_NAME,
