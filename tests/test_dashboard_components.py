@@ -258,3 +258,81 @@ def test_globe_rejects_invalid_coordinates(coordinates: tuple[object, ...]) -> N
 
     with pytest.raises(ValueError):
         _globe_payload([], [], False, {'New region': coordinates})
+
+
+# Ensures all requested severity colors are distinct and unknown severity stays neutral.
+@pytest.mark.parametrize('level', ['red', 'orange', 'yellow', 'green', 'unknown', None, 'invalid'])
+def test_severity_color(level: str | None) -> None:
+    from dashboard.components import severity_color
+
+    assert severity_color(level).startswith('#')
+    assert len({severity_color(key) for key in ('red', 'orange', 'yellow', 'green')}) == 4
+    assert severity_color(None) == severity_color('invalid') == severity_color('unknown')
+    assert severity_color('green') != severity_color('unknown')
+
+
+# Renders every badge through Streamlit without requiring an agent call.
+def _render_severity(level: str | None) -> None:
+    from dashboard.components import severity_alert
+
+    severity_alert(level)
+
+
+# Each severity retains its plain-language meaning without relying solely on color.
+@pytest.mark.parametrize('level,label', [
+    ('red', 'Critical danger'), ('orange', 'High concern'),
+    ('yellow', 'Moderate concern'), ('green', 'Beneficial event'),
+    (None, 'Severity not assessed'),
+])
+def test_severity_badge_renders(level: str | None, label: str) -> None:
+    app = AppTest.from_function(_render_severity, args=(level,)).run()
+    assert not app.exception
+    assert label in _visible_text(app)
+    assert 'prefers-reduced-motion' in _visible_text(app)
+
+
+# Severity must remain an explicit input, never a guess based on values or confidence.
+def test_globe_preserves_explicit_severity(records: tuple[list[AnomalyRecord], Assessment]) -> None:
+    from dashboard.components import _globe_payload
+
+    anomalies, assessment = records
+    anomaly_id = anomalies[0].anomaly_id
+    for level in ('red', 'orange', 'yellow', 'green'):
+        payload = json.loads(_globe_payload(anomalies, [assessment], False, severity_by_anomaly={anomaly_id: level}))
+        assert payload['severityByAnomaly'] == {anomaly_id: level}
+    payload = json.loads(_globe_payload(anomalies, [assessment], False))
+    assert payload['severityByAnomaly'] == {}
+    assert payload['severityStyles']['unknown']['color'] != payload['severityStyles']['green']['color']
+
+
+# Invalid classifications and wrong event IDs cannot silently color an unrelated event.
+@pytest.mark.parametrize('mapping', [[], {'missing_event': 'red'}, {'sample_nino12_001': 'bad'}, {'sample_nino12_001': None}])
+def test_globe_rejects_invalid_severity(records: tuple[list[AnomalyRecord], Assessment], mapping: object) -> None:
+    from dashboard.components import _globe_payload
+
+    anomalies, assessment = records
+    with pytest.raises(ValueError):
+        _globe_payload(anomalies, [assessment], False, severity_by_anomaly=mapping)
+
+
+# Exercises severity changes across dated observations without calling any backend.
+def _render_status_severity(anomaly: 'AnomalyRecord', days: int) -> None:
+    from datetime import timedelta
+
+    from dashboard.components import status_strip
+
+    recent = anomaly.model_copy(update={
+        'anomaly_id': 'sample_recent', 'observation_date': anomaly.observation_date + timedelta(days=days),
+    })
+    status_strip([anomaly, recent], True, severity_by_anomaly={anomaly.anomaly_id: 'red', recent.anomaly_id: 'green'})
+
+
+# An old critical classification cannot override a newer beneficial observation.
+@pytest.mark.parametrize('days,label', [(0, 'Critical danger'), (30, 'Beneficial event')])
+def test_status_severity_uses_current_observations(
+    records: tuple[list[AnomalyRecord], Assessment], days: int, label: str,
+) -> None:
+    anomalies, _ = records
+    app = AppTest.from_function(_render_status_severity, args=(anomalies[0], days)).run()
+    assert not app.exception
+    assert label in _visible_text(app)

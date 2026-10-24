@@ -27,6 +27,51 @@ STATUS_LABELS = {
 }
 
 
+SEVERITY_STYLES = {
+    "red": ("#FF767C", "Critical danger"),
+    "orange": ("#FFB16A", "High concern"),
+    "yellow": ("#F6DB72", "Moderate concern"),
+    "green": ("#79DFB5", "Beneficial event"),
+    "unknown": ("#B8C8D9", "Severity not assessed"),
+}
+
+
+# Looks up an explicit classification without inferring danger from anomaly direction.
+def severity_color(level: str | None) -> str:
+    return SEVERITY_STYLES.get(level, SEVERITY_STYLES["unknown"])[0]
+
+
+# Shows a labeled severity badge with a brief pulse and reduced-motion support.
+def severity_alert(level: str | None) -> None:
+    color, label = SEVERITY_STYLES.get(level, SEVERITY_STYLES["unknown"])
+    active = level in {"red", "orange", "yellow", "green"}
+    animation = "animation:ew-alert-pulse 2s ease-in-out 2;" if active else ""
+    st.markdown(
+        '<style>@keyframes ew-alert-pulse{0%,100%{box-shadow:0 0 0 0 transparent}'
+        '50%{box-shadow:0 0 0 5px currentColor}}'
+        '@media(prefers-reduced-motion:reduce){.ew-severity{animation:none!important}}</style>'
+        f'<span class="ew-severity" style="color:{color};border:1px solid currentColor;'
+        f'display:inline-block;border-radius:6px;padding:.35rem .7rem;{animation}">'
+        f'{label}</span>', unsafe_allow_html=True,
+    )
+
+
+# Validates the UI feed adapter until severity is part of the team's shared schema.
+def _severity_mapping(
+    anomalies: list[AnomalyRecord], severity_by_anomaly: dict[str, str] | None,
+) -> dict[str, str]:
+    levels = {} if severity_by_anomaly is None else severity_by_anomaly
+    ids = {item.anomaly_id for item in anomalies}
+    if not isinstance(levels, dict):
+        raise ValueError("Severity must be a mapping from anomaly ID to color level.")
+    for anomaly_id, level in levels.items():
+        if anomaly_id not in ids:
+            raise ValueError("Severity was supplied for an unknown anomaly ID.")
+        if not isinstance(level, str) or level not in SEVERITY_STYLES:
+            raise ValueError("Severity must be red, orange, yellow, green, or unknown.")
+    return dict(levels)
+
+
 # Returns an accessible foreground color without treating unknown levels as certainty.
 def confidence_color(level: str) -> str:
     return CONFIDENCE_COLORS.get(level, "#CBD5E1")
@@ -57,7 +102,11 @@ def _findings(items: list[str], empty_message: str) -> None:
 
 
 # Summarizes regional signal status and explicitly dates the displayed observations.
-def status_strip(anomalies: list[AnomalyRecord], is_sample: bool) -> None:
+def status_strip(
+    anomalies: list[AnomalyRecord], is_sample: bool, *,
+    severity_by_anomaly: dict[str, str] | None = None,
+) -> None:
+    levels = _severity_mapping(anomalies, severity_by_anomaly)
     st.subheader("Monitoring status")
     if not anomalies:
         st.info("No observations available. Monitoring status cannot be determined.")
@@ -81,14 +130,19 @@ def status_strip(anomalies: list[AnomalyRecord], is_sample: bool) -> None:
             with column:
                 st.metric(region, STATUS_LABELS.get(status, "Unknown status"))
                 st.caption(f"Observed {region_date:%Y-%m-%d}")
+                if levels:
+                    priority = {"red": 4, "orange": 3, "yellow": 2, "green": 1, "unknown": 0}
+                    level = max((levels.get(item.anomaly_id, "unknown") for item in latest_records), key=priority.get)
+                    severity_alert(level)
 
 
 # Presents a compact anomaly card with a textual selection indicator.
-def anomaly_card(anomaly: AnomalyRecord, selected: bool = False) -> None:
+def anomaly_card(anomaly: AnomalyRecord, selected: bool = False, *, severity: str | None = None) -> None:
     with st.container(border=True):
         if selected:
             st.caption("● Selected signal")
         st.text(anomaly.region)
+        severity_alert(severity)
         st.caption(_readable(anomaly.variable))
         st.metric("Recorded value", _measurement(anomaly))
         label = escape(STATUS_LABELS.get(anomaly.status, "Unknown status"))
@@ -101,8 +155,9 @@ def anomaly_card(anomaly: AnomalyRecord, selected: bool = False) -> None:
 
 
 # Explains the selected record and offers a short optional walkthrough.
-def anomaly_detail(anomaly: AnomalyRecord) -> None:
+def anomaly_detail(anomaly: AnomalyRecord, *, severity: str | None = None) -> None:
     st.subheader("Signal details")
+    severity_alert(severity)
     st.text(f"{anomaly.region} · {_readable(anomaly.variable)}")
     left, right = st.columns(2)
     with left:
@@ -179,12 +234,13 @@ def evidence_list(evidence: list[EvidenceItem]) -> None:
 
 
 # Separates supplied observations, interpretations, provenance, and uncertainty.
-def briefing(assessment: Assessment, anomaly: AnomalyRecord) -> None:
+def briefing(assessment: Assessment, anomaly: AnomalyRecord, *, severity: str | None = None) -> None:
     if assessment.anomaly_id != anomaly.anomaly_id:
         st.error("This assessment belongs to a different signal. Run an investigation for the selected signal.")
         return
     st.caption("Regional briefing")
     st.subheader(assessment.summary)
+    severity_alert(severity)
     level = escape(assessment.confidence.capitalize())
     st.markdown(
         f'<span class="ew-confidence" style="color:{confidence_color(assessment.confidence)}">'
@@ -263,6 +319,7 @@ def _globe_regions(
 def _globe_payload(
     anomalies: list[AnomalyRecord], assessments: list[Assessment], is_sample: bool,
     region_locations: dict[str, tuple[float, float]] | None = None,
+    severity_by_anomaly: dict[str, str] | None = None,
 ) -> str:
     import json
 
@@ -270,6 +327,8 @@ def _globe_payload(
         "anomalies": [item.model_dump(mode="json") for item in anomalies],
         "assessments": [item.model_dump(mode="json") for item in assessments],
         "regions": _globe_regions(anomalies, region_locations),
+        "severityByAnomaly": _severity_mapping(anomalies, severity_by_anomaly),
+        "severityStyles": {key: {"color": value[0], "label": value[1]} for key, value in SEVERITY_STYLES.items()},
         "isSample": is_sample,
     }
     return json.dumps(payload, ensure_ascii=True).replace("<", "\\u003c")
@@ -279,9 +338,10 @@ def _globe_payload(
 def _globe_document(
     anomalies: list[AnomalyRecord], assessments: list[Assessment], is_sample: bool,
     region_locations: dict[str, tuple[float, float]] | None = None,
+    severity_by_anomaly: dict[str, str] | None = None,
 ) -> str:
     return _GLOBE_HTML.replace(
-        "__EARTHWATCH_PAYLOAD__", _globe_payload(anomalies, assessments, is_sample, region_locations),
+        "__EARTHWATCH_PAYLOAD__", _globe_payload(anomalies, assessments, is_sample, region_locations, severity_by_anomaly),
     )
 
 
@@ -290,13 +350,15 @@ def climate_globe(
     anomalies: list[AnomalyRecord], assessments: list[Assessment] | None = None,
     is_sample: bool = False, *,
     region_locations: dict[str, tuple[float, float]] | None = None,
+    severity_by_anomaly: dict[str, str] | None = None,
 ) -> None:
-    document = _globe_document(anomalies, assessments or [], is_sample, region_locations)
+    """Render supplied data; severity colors are explicit classifications keyed by anomaly ID."""
+    document = _globe_document(anomalies, assessments or [], is_sample, region_locations, severity_by_anomaly)
     if hasattr(st, "iframe"):
         st.iframe(document, height="content", alt="Worldwide Earth explorer with climate observations and agent evidence")
     else:
         st.info("The interactive globe requires a Streamlit version with st.iframe. Regional observations remain available below.")
-        status_strip(anomalies, is_sample)
+        status_strip(anomalies, is_sample, severity_by_anomaly=severity_by_anomaly)
 
 
 _GLOBE_HTML = r'''<!doctype html>
@@ -305,6 +367,7 @@ _GLOBE_HTML = r'''<!doctype html>
 <style>
 *{box-sizing:border-box}body{margin:0;background:#080f18;color:#edf3f8;font:14px/1.6 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
 button,select{font:inherit}button,a,select{touch-action:manipulation}button{cursor:pointer}button:focus-visible,a:focus-visible,select:focus-visible,canvas:focus-visible{outline:3px solid #8be5c7;outline-offset:4px}button{min-height:44px;color:#c0d0df;border:1px solid #304252;border-radius:8px;background:#111e2c;padding:9px 14px}button:hover{background:#1d3040;color:#fff}button[aria-pressed=true]{color:#9debd1;border-color:#81c9af;background:#142e2c}a{color:#9debd1;text-underline-offset:3px}p{margin:0 0 12px}h1,h2,h3{line-height:1.25;margin:0}h1{font-size:32px;font-weight:500;letter-spacing:-1px}h2{font-size:24px;font-weight:500;letter-spacing:-.5px}h3{font-size:13px;font-weight:600;margin:24px 0 9px;color:#edf3f8}.eyebrow{font-size:10px;letter-spacing:2px;text-transform:uppercase;color:#a2b5c6;font-weight:650}.shell{border:1px solid #263746;border-radius:16px;overflow:hidden;background:radial-gradient(ellipse at 30% 35%,#152331 0%,#080f18 64%)}header{display:flex;justify-content:space-between;gap:20px;align-items:center;padding:24px 28px;border-bottom:1px solid #263746}header .wordmark{display:flex;align-items:center;gap:12px}.icon{width:34px;height:34px;border:1px solid #89c9b6;border-radius:50%;display:grid;place-items:center;color:#9debd1;font-size:24px}.source-state{font-size:11px;border:1px solid #4c4c3b;border-radius:5px;color:#edcf92;padding:5px 9px}.main{display:grid;grid-template-columns:minmax(0,1fr) 330px;min-height:650px}.world{position:relative;min-height:650px;isolation:isolate;overflow:hidden}.world-top{position:absolute;left:28px;right:24px;top:26px;pointer-events:none;z-index:2}.world-top p{color:#b2c3d1;font-size:12px;margin-top:10px;max-width:330px}.view-label{position:absolute;left:28px;bottom:93px;color:#a2b5c6;font-size:10px;letter-spacing:1.6px;text-transform:uppercase;pointer-events:none}.view-label span{display:block;color:#dce9f0;letter-spacing:0;font-size:12px;margin-top:5px;text-transform:none}.tools{position:absolute;left:24px;bottom:24px;right:24px;z-index:2;display:flex;gap:8px;flex-wrap:wrap}.tools button{background:#101c29e8;font-size:12px}.tools button:first-child{color:#b8efd9}.legend{position:absolute;right:24px;bottom:100px;color:#a8bac9;font-size:11px;pointer-events:none}.dot{display:inline-block;width:6px;height:6px;background:#99efd4;border-radius:50%;margin-right:6px}.dot.amber{background:#eac284}.panel{background:#0d1722ee;border-left:1px solid #263746;padding:26px 24px;max-height:690px;overflow:auto;scrollbar-color:#405667 #0d1722}.panel label{display:block;margin:0 0 8px}select{width:100%;color:#e6eef4;background:#142331;border:1px solid #3a4d5b;border-radius:6px;padding:11px 9px;min-height:44px}#region-title{margin:22px 0 8px}.badge{display:inline-block;font-size:10px;text-transform:uppercase;letter-spacing:1px;border:1px solid #637d74;color:#a8e9cf;padding:3px 7px;border-radius:4px;margin:4px 0 15px}.reading{font-size:38px;line-height:1.3;letter-spacing:-1px;color:#e9f6f1;font-variant-numeric:tabular-nums}.reading small{font-size:18px;color:#a6b8c9;letter-spacing:0}.muted{color:#a8bac9;font-size:12px}.rule{border-top:1px solid #263746;margin:20px 0}.meta{display:grid;grid-template-columns:76px minmax(0,1fr);gap:8px;font-size:12px}.meta dt{color:#a8bac9}.meta dd{margin:0;overflow-wrap:anywhere}.feed-state{display:flex;align-items:center;gap:8px;color:#a9bbca;font-size:11px}.feed-state::before{content:"";width:5px;height:5px;border-radius:50%;background:#eac284}.evidence{border-top:1px solid #263746;padding:12px 0}.evidence p{font-size:12px;margin:6px 0}.evidence a{font-size:12px}.evidence .eyebrow{font-size:9px;letter-spacing:1px}ul{padding-left:18px;font-size:12px;color:#c8d5e0}li{margin:6px 0}footer{border-top:1px solid #263746;padding:13px 24px;display:flex;justify-content:space-between;gap:12px;color:#9eafbf;font-size:10px;flex-wrap:wrap}#viewport{position:absolute;inset:0}canvas{display:block;touch-action:none}#loading{position:absolute;left:28px;top:130px;font-size:12px;color:#b9c9d8;max-width:330px;z-index:2}#tooltip{position:absolute;display:none;background:#142331f5;border:1px solid #506777;border-radius:6px;padding:7px 12px;color:#edf3f8;font-size:12px;pointer-events:none;z-index:3}#fallback{display:none;position:absolute;inset:170px 25px 170px;border:1px solid #304252;border-radius:10px;background:#10202c;padding:25px;color:#b8cad8;font-size:13px}#canvas-status{position:absolute;left:28px;bottom:155px;font-size:11px;color:#b8cad8;pointer-events:none}.help{margin-top:22px;border:1px solid #304252;border-radius:8px;padding:12px;font-size:12px;color:#aebfcd}.help summary{cursor:pointer;min-height:34px;display:flex;align-items:center;color:#d8e5ee}.help ol{padding-left:18px}.help li{margin:8px 0}.hidden{display:none!important}@media(max-width:760px){header{padding:18px}.main{grid-template-columns:1fr}.world{min-height:530px}.panel{border-left:0;border-top:1px solid #263746;max-height:none;padding:24px}.world-top{left:20px;top:20px}.world-top h1{font-size:28px}.world-top p{max-width:260px}.legend{display:none}.tools{left:16px;right:16px;bottom:16px;gap:5px}.tools button{padding:8px 11px}.view-label{bottom:125px;left:20px}#canvas-status{bottom:174px;left:20px}.source-state{font-size:9px}header .eyebrow{font-size:9px}.world-top .eyebrow{display:none}}@media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
+.severity-alert{border:1px solid currentColor;border-radius:6px;padding:7px 10px;display:inline-block;font-size:12px;margin:8px 0 14px;color:var(--alert-color)}.severity-pulse{animation:ew-severity-pulse 2s ease-in-out infinite}@keyframes ew-severity-pulse{0%,100%{box-shadow:0 0 0 0 transparent}50%{box-shadow:0 0 0 4px currentColor}}.severity-guide-item{font-size:12px;margin:7px 0}body[data-alert-motion="off"] .severity-pulse{animation:none}@media(prefers-reduced-motion:reduce){.severity-pulse{animation:none!important}}
 </style>
 <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/"}}</script>
 </head><body><div class="shell">
@@ -313,10 +376,10 @@ button,select{font:inherit}button,a,select{touch-action:manipulation}button{curs
 <div class="world-top"><div class="eyebrow">01 / Earth explorer</div><h1>The Earth, in focus.</h1><p>Follow the signals. Explore the evidence.<br>Understand a changing planet.</p></div>
 <div id="viewport"></div><div id="loading" role="status">Loading Earth imagery…</div><div id="fallback" role="status"></div><div id="tooltip"></div>
 <div class="view-label">Worldwide climate watch<span>Drag to explore · Scroll or pinch to zoom</span></div><div id="canvas-status" role="status" aria-live="polite"></div>
-<div class="legend"><div><span class="dot"></span>Observation supplied</div><div><span class="dot amber"></span>Awaiting coverage</div></div>
-<div class="tools" aria-label="Globe controls"><button id="rotate" aria-pressed="true">Pause rotation</button><button id="reset">World view</button><button id="zoom-in" aria-label="Zoom in">＋</button><button id="zoom-out" aria-label="Zoom out">−</button></div>
+<div class="legend"><div><span class="dot" style="background:#B8C8D9"></span>Severity shown in region panel</div><div><span class="dot" style="background:#6B7C8E"></span>Awaiting coverage</div></div>
+<div class="tools" aria-label="Globe controls"><button id="rotate" aria-pressed="true">Pause rotation</button><button id="reset">World view</button><button id="alert-motion" aria-pressed="true">Pause alert pulses</button><button id="zoom-in" aria-label="Zoom in">＋</button><button id="zoom-out" aria-label="Zoom out">−</button></div>
 </section><aside class="panel" aria-label="Selected region information"><label for="region" class="eyebrow">Explore a region</label><select id="region"><option value="__world__">Worldwide overview</option></select>
-<div id="region-body" aria-live="polite"></div><details class="help"><summary>How to explore</summary><ol><li>Drag the Earth or use the region selector.</li><li>Click any regional marker or any point on Earth.</li><li>Read the dated observation and expand its evidence.</li><li>When rotation is on, dragging pauses it and it resumes after 3 seconds. Use Pause rotation for a stationary view.</li></ol><p>The selector provides keyboard access to every monitored region. Regions without a feed show an empty state. Markers represent regional centers, not national boundaries.</p></details></aside></div>
+<details class="help"><summary>Alert color guide</summary><div id="severity-guide"></div><p>Green means a beneficial event; it does not mean an area is free of hazards. Gray means severity has not been assessed. App classifications are distinct from official warnings.</p></details><div id="region-body" aria-live="polite"></div><details class="help"><summary>How to explore</summary><ol><li>Drag the Earth or use the region selector.</li><li>Click any regional marker or any point on Earth.</li><li>Read the dated observation and expand its evidence.</li><li>When rotation is on, dragging pauses it and it resumes after 3 seconds. Use Pause rotation for a stationary view.</li></ol><p>The selector provides keyboard access to every monitored region. Regions without a feed show an empty state. Markers represent regional centers, not national boundaries.</p></details></aside></div>
 <footer><span>Earth imagery: Three.js Earth texture collection · illustrative surface, not live satellite imagery</span><span id="coverage"></span></footer></div>
 <script id="earthwatch-data" type="application/json">__EARTHWATCH_PAYLOAD__</script>
 <script>
@@ -337,18 +400,32 @@ for(const region of data.regions){const option=document.createElement('option');
 function add(parent,tag,text,cls='') {const el=document.createElement(tag);el.textContent=text;if(cls)el.className=cls;parent.append(el);return el;}
 // Accepts only navigable HTTP or HTTPS evidence URLs.
 function sourceLink(parent,item){if(!item.url)return;try{const url=new URL(item.url);if(!['https:','http:'].includes(url.protocol))return;const link=add(parent,'a','Open source ↗');link.href=url.href;link.target='_blank';link.rel='noopener noreferrer';}catch{}}
+const severityRank={red:4,orange:3,yellow:2,green:1,unknown:0};
+// Uses only the explicit classification attached to the matching anomaly ID.
+function severityFor(record){return data.severityStyles[data.severityByAnomaly[record?.anomaly_id]||'unknown']||data.severityStyles.unknown;}
+// Keeps latest observations first and prioritizes severity only for observations on the same date.
+function latestRecords(records){return [...records].sort((a,b)=>b.observation_date.localeCompare(a.observation_date)||(severityRank[data.severityByAnomaly[b.anomaly_id]]||0)-(severityRank[data.severityByAnomaly[a.anomaly_id]]||0));}
+// Adds a readable badge; animation is optional and color is not the only signal.
+function alertBadge(parent,record){const style=severityFor(record);const badge=add(parent,'div',style.label,'severity-alert');badge.style.setProperty('--alert-color',style.color);if(style!==data.severityStyles.unknown)badge.classList.add('severity-pulse');}
+for(const key of ['red','orange','yellow','green','unknown']){const style=data.severityStyles[key];const entry=add(document.getElementById('severity-guide'),'div',key.toUpperCase()+' · '+style.label,'severity-guide-item');entry.style.color=style.color;}
+const pulseButton=document.getElementById('alert-motion');let pulsePreference=!matchMedia('(prefers-reduced-motion: reduce)').matches;
+// Applies a user-controlled motion preference to both DOM badges and 3D alert rings.
+function setAlertMotion(value){pulsePreference=value;document.body.dataset.alertMotion=value?'on':'off';pulseButton.setAttribute('aria-pressed',String(value));pulseButton.textContent=value?'Pause alert pulses':'Resume alert pulses';window.dispatchEvent(new CustomEvent('earthwatch-alert-motion',{detail:value}));}
+pulseButton.onclick=()=>setAlertMotion(!pulsePreference);setAlertMotion(pulsePreference);
+matchMedia('(prefers-reduced-motion: reduce)').addEventListener('change',event=>{if(event.matches)setAlertMotion(false);});
 // Displays only records and assessment evidence supplied by the Python backend.
 function regionPanel(region) {
  const parent=document.getElementById('region-body');parent.replaceChildren();
  add(parent,'h2',names[region]||region).id='region-title';add(parent,'p',region==='__world__'?'Climate observations and evidence from around the world.':'Regional climate observations and evidence.','muted');
- const records=data.anomalies.filter(item=>region==='__world__'||item.region===region).sort((a,b)=>b.observation_date.localeCompare(a.observation_date));
+ const records=latestRecords(data.anomalies.filter(item=>region==='__world__'||item.region===region));
  const record=records[0];
  if(region==='__world__'){
   add(parent,'span',available.size+' regions with observations','badge');add(parent,'p','Worldwide navigation is available. Data coverage depends on the connected feeds.','muted');
   if(records.length)add(parent,'p','Latest supplied observation: '+records[0].observation_date,'muted');
   const latest=new Map();for(const item of records)if(!latest.has(item.region))latest.set(item.region,item);
-  for(const item of latest.values()){add(parent,'h3',item.region);add(parent,'p',`${item.value} ${item.unit} · ${item.observation_date}`);add(parent,'p',item.variable.replaceAll('_',' ')+' · '+item.source,'muted');}
+  for(const item of latest.values()){add(parent,'h3',item.region);alertBadge(parent,item);add(parent,'p',`${item.value} ${item.unit} · ${item.observation_date}`);add(parent,'p',item.variable.replaceAll('_',' ')+' · '+item.source,'muted');}
  }else if(record){
+  alertBadge(parent,record);
   add(parent,'span',record.status==='detected'?'Signal detected':record.status,'badge');
   const reading=add(parent,'div',Number(record.value).toLocaleString(undefined,{maximumFractionDigits:2}),'reading');add(reading,'small',' '+(record.unit==='degC'?'°C':record.unit));
   add(parent,'p',record.variable.replaceAll('_',' '),'muted');
@@ -371,7 +448,7 @@ function regionPanel(region) {
   if(report.limitations.length){add(parent,'h3','Limitations');for(const text of report.limitations)add(parent,'p',text,'muted');}
  }
  const location=data.regions.find(item=>item.name===region);if(record&&location?.latitude===null)add(parent,'p','Map location not supplied. This report is listed without guessing its coordinates.','muted');
- add(parent,'p','An observed anomaly alone does not establish a specific disaster forecast.','muted');
+ add(parent,'p','Event severity comes from an explicit assessment, independently of confidence. App alerts do not replace official warnings.','muted');
 }
 select.addEventListener('change',()=>{regionPanel(select.value);window.dispatchEvent(new CustomEvent('earthwatch-focus',{detail:select.value}));});
 regionPanel(select.value);
@@ -405,18 +482,19 @@ try {
  // Draws geographic monitoring boundaries with enough vertices to follow Earth's curvature.
  for(const [region,[south,north,west,east]] of Object.entries(boxes)){
   const points=[];for(let i=0;i<=48;i++)points.push(xyz(south,west+(east-west)*i/48));for(let i=1;i<=24;i++)points.push(xyz(south+(north-south)*i/24,east));for(let i=1;i<=48;i++)points.push(xyz(north,east-(east-west)*i/48));for(let i=1;i<=24;i++)points.push(xyz(north-(north-south)*i/24,west));
-  const line=new THREE.Line(new THREE.BufferGeometry().setFromPoints(points),new THREE.LineBasicMaterial({color:0x91ebd0,transparent:true,opacity:.85}));scene.add(line);overlays[region]=line;
+  const line=new THREE.Line(new THREE.BufferGeometry().setFromPoints(points),new THREE.LineBasicMaterial({color:severityFor(latestRecords(data.anomalies.filter(item=>item.region===region))[0]).color,transparent:true,opacity:.85}));scene.add(line);overlays[region]=line;
  }
- const markers=[];
+ const markers=[];const alertRings=[];
  // Marks every global navigation center and every geolocated backend region.
  for(const [name,coordinates] of Object.entries(centers)){
-  const color=available.has(name)?0x99efd4:0xeac284;
+  const record=latestRecords(data.anomalies.filter(item=>item.region===name))[0];
+  const color=record?severityFor(record).color:'#6B7C8E';
   const marker=new THREE.Mesh(new THREE.SphereGeometry(.012,16,12),new THREE.MeshBasicMaterial({color}));marker.position.copy(xyz(...coordinates,1.016));marker.userData.region=name;scene.add(marker);markers.push(marker);
-  const ring=new THREE.Mesh(new THREE.RingGeometry(.021,.026,32),new THREE.MeshBasicMaterial({color,side:THREE.DoubleSide,transparent:true,opacity:.65}));ring.position.copy(xyz(...coordinates,1.01));ring.lookAt(ring.position.clone().multiplyScalar(2));scene.add(ring);
+  const ring=new THREE.Mesh(new THREE.RingGeometry(.021,.026,32),new THREE.MeshBasicMaterial({color,side:THREE.DoubleSide,transparent:true,opacity:.65}));ring.position.copy(xyz(...coordinates,1.01));ring.lookAt(ring.position.clone().multiplyScalar(2));scene.add(ring);if(record&&data.severityByAnomaly[record.anomaly_id]&&data.severityByAnomaly[record.anomaly_id]!=='unknown')alertRings.push(ring);
  }
  let targetPosition=null;
  // Focuses a region and stops rotation so a selected area remains available to inspect.
- function focus(region){if(region==='__world__'){rotation(false);targetPosition=new THREE.Vector3(3.0,1.4,1.6);return;}const position=centers[region];if(!position){document.getElementById('canvas-status').textContent='Map location not supplied for '+region;return;}rotation(false);targetPosition=xyz(...position,3.6);for(const [key,line] of Object.entries(overlays)){line.material.color.set(key===region?0xffffff:0x91ebd0);line.material.opacity=key===region?1:.6;}document.getElementById('canvas-status').textContent='Viewing '+names[region];}
+ function focus(region){if(region==='__world__'){rotation(false);targetPosition=new THREE.Vector3(3.0,1.4,1.6);return;}const position=centers[region];if(!position){document.getElementById('canvas-status').textContent='Map location not supplied for '+region;return;}rotation(false);targetPosition=xyz(...position,3.6);for(const [key,line] of Object.entries(overlays)){line.material.color.set(key===region?'#ffffff':severityFor(latestRecords(data.anomalies.filter(item=>item.region===key))[0]).color);line.material.opacity=key===region?1:.6;}document.getElementById('canvas-status').textContent='Viewing '+names[region];}
  window.addEventListener('earthwatch-focus',event=>focus(event.detail));
  document.getElementById('reset').onclick=()=>{select.value='__world__';regionPanel('__world__');focus('__world__');document.getElementById('canvas-status').textContent='Worldwide view';};
  document.getElementById('zoom-in').onclick=()=>{targetPosition=null;camera.position.multiplyScalar(Math.max(2.2/camera.position.length(),.85));controls.update();};document.getElementById('zoom-out').onclick=()=>{targetPosition=null;camera.position.multiplyScalar(Math.min(5.5/camera.position.length(),1.15));controls.update();};
@@ -434,7 +512,7 @@ try {
  new ResizeObserver(()=>{const width=viewport.clientWidth,height=viewport.clientHeight;camera.aspect=width/height;camera.fov=THREE.MathUtils.radToDeg(2*Math.atan(Math.tan(THREE.MathUtils.degToRad(36)/2)/Math.min(1,camera.aspect)));camera.updateProjectionMatrix();renderer.setSize(width,height);}).observe(viewport);
  const clock=new THREE.Clock();let previous=0;
  // Keeps lighting tied to the viewing direction for a legible, naturally shaded surface.
- renderer.setAnimationLoop(()=>{const elapsed=clock.getElapsedTime(),delta=Math.min(elapsed-previous,.05);previous=elapsed;if(document.hidden)return;if(targetPosition){camera.position.lerp(targetPosition,1-Math.exp(-delta*5));if(camera.position.distanceTo(targetPosition)<.002)targetPosition=null;}controls.update(delta);sun.position.copy(camera.position).add(new THREE.Vector3(-2,2,1));renderer.render(scene,camera);});
+ renderer.setAnimationLoop(()=>{const elapsed=clock.getElapsedTime(),delta=Math.min(elapsed-previous,.05);previous=elapsed;if(document.hidden)return;for(const ring of alertRings){const pulse=pulsePreference ? .5+.5*Math.sin(elapsed*Math.PI) : 0;ring.scale.setScalar(1+pulse*.3);ring.material.opacity=.6+pulse*.3;}if(targetPosition){camera.position.lerp(targetPosition,1-Math.exp(-delta*5));if(camera.position.distanceTo(targetPosition)<.002)targetPosition=null;}controls.update(delta);sun.position.copy(camera.position).add(new THREE.Vector3(-2,2,1));renderer.render(scene,camera);});
  clearTimeout(window.globeTimer);document.getElementById('loading').hidden=true;document.getElementById('fallback').style.display='none';
  window.addEventListener('pagehide',()=>{clearTimeout(rotationTimer);renderer.setAnimationLoop(null);controls.dispose();renderer.dispose();});
 } catch(error){clearTimeout(window.globeTimer);window.globeFallback('The 3D view is unavailable. Use the region selector to explore observations and evidence.');console.error('EarthWatch globe:',error);}
