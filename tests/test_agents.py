@@ -8,6 +8,7 @@ import inspect
 import json
 from datetime import date
 from types import SimpleNamespace
+from urllib.parse import urlparse
 
 import numpy as np
 import pandas as pd
@@ -16,7 +17,7 @@ import requests
 from pydantic import ValidationError
 
 import translator
-from agents import briefing, provenance, workflow
+from agents import briefing, prompts, provenance, workflow
 from agents.agent_errors import AgentOutputError, GrokError
 from agents.context import build_context, infer_as_of_date
 from agents.agent_models import (
@@ -30,7 +31,7 @@ from agents.ledger import EvidenceLedger, LedgerSource
 from agents.runner import extract_json, run_agent
 from agents.sentinel import monitor, same_sign_run
 from agents.skeptic import review
-from agents.toolbox import MAX_TEXT_CHARS, AgentToolbox
+from agents.toolbox import MAX_TEXT_CHARS, OFFICIAL_SOURCES, AgentToolbox
 from data import climate_sources, rainfall_sources, weather_sources
 from schemas.anomaly import AnomalyRecord
 from schemas.assessment import Assessment
@@ -1879,3 +1880,127 @@ def test_assessment_schema_compatibility():
         Assessment.model_validate(
             {**base, "action_plan": {**bad_plan, "alert_level": "monitor", "extra": 1}}
         )
+
+
+# =============================================================================
+# Regression tests from the first live Grok run
+# =============================================================================
+
+PIURA_SOURCE = "Open-Meteo Piura daily precipitation (ERA5 reanalysis precipitation)"
+TUMBES_SOURCE = "Open-Meteo Tumbes daily precipitation (ERA5 reanalysis precipitation)"
+
+
+# Checks every official source URL is HTTPS on the host verified to respond.
+def test_official_source_urls_use_reachable_host():
+    for source_id, entry in OFFICIAL_SOURCES.items():
+        parsed = urlparse(entry["url"])
+        assert parsed.scheme == "https", source_id
+        assert parsed.hostname == "www.cpc.ncep.noaa.gov", source_id
+
+
+# Builds a ledger holding a Piura and a Tumbes rainfall source.
+def two_place_ledger() -> EvidenceLedger:
+    ledger = EvidenceLedger()
+    ledger.record_source(LedgerSource(PIURA_SOURCE, "measurement"))
+    ledger.record_source(LedgerSource(TUMBES_SOURCE, "measurement"))
+    return ledger
+
+
+# Builds one measured rainfall claim for verify_evidence tests.
+def rainfall_claim(claim: str, source: str) -> AgentEvidence:
+    return AgentEvidence(claim=claim, source=source, evidence_type="measured")
+
+
+# Checks a claim about one place cannot be credited to another place's source.
+def test_claim_citing_wrong_location_source_is_uncertain():
+    claim = rainfall_claim("Tumbes 90-day rainfall total 1460.8 mm", PIURA_SOURCE)
+    [verified] = provenance.verify_evidence([claim], two_place_ledger())
+    assert verified.evidence_type == "uncertain"
+    assert "Tumbes" in verified.limitations
+    assert "Piura" in verified.limitations
+
+
+# Checks correctly attributed location claims keep their measured status.
+@pytest.mark.parametrize(
+    ("claim", "source"),
+    [
+        ("Piura 90-day rainfall total 899 mm", PIURA_SOURCE),
+        ("Tumbes 90-day rainfall total 1460.8 mm", TUMBES_SOURCE),
+        ("The 90-day rainfall total was 899 mm", PIURA_SOURCE),
+    ],
+)
+def test_correctly_attributed_location_claim_is_kept(claim, source):
+    [verified] = provenance.verify_evidence(
+        [rainfall_claim(claim, source)], two_place_ledger()
+    )
+    assert verified.evidence_type == "measured"
+    assert verified.limitations is None
+
+
+# Checks a claim spanning two places cannot be backed by one place's source.
+def test_claim_covering_two_places_with_one_source_is_uncertain():
+    claim = rainfall_claim("Piura and Tumbes both exceeded 800 mm", PIURA_SOURCE)
+    [verified] = provenance.verify_evidence([claim], two_place_ledger())
+    assert verified.evidence_type == "uncertain"
+
+
+# Checks sources that do not name a place are not affected by the location rule.
+def test_location_rule_ignores_sources_without_a_place():
+    ledger = EvidenceLedger()
+    ledger.record_source(LedgerSource(LOCAL_SOURCE_NAME, "measurement"))
+    claim = rainfall_claim("Piura was wetter than usual", LOCAL_SOURCE_NAME)
+    [verified] = provenance.verify_evidence([claim], ledger)
+    assert verified.evidence_type == "measured"
+
+
+# Checks the workflow downgrades a Tumbes claim that cites the Piura source.
+def test_workflow_downgrades_wrong_location_citation(anomaly, toolbox, working_data):
+    impact = impact_payload(
+        evidence=[
+            {
+                "claim": "Tumbes 90-day rainfall total 1460.8 mm",
+                "source": "Open-Meteo Piura daily precipitation",
+                "evidence_type": "measured",
+            },
+            {
+                "claim": "Tumbes daily rainfall reached 150.8 mm",
+                "source": "Open-Meteo Tumbes daily precipitation",
+                "evidence_type": "measured",
+            },
+        ]
+    )
+    tumbes_args = {**RAINFALL_ARGS, "location": "Tumbes"}
+    client = happy_path_client(
+        **{
+            IMPACT_ANALYST: [
+                tool_reply(
+                    ("get_rainfall_history", RAINFALL_ARGS),
+                    ("get_rainfall_history", tumbes_args),
+                ),
+                text_reply(impact),
+            ]
+        }
+    )
+    assessment, _ = run_with_fakes(anomaly, client, toolbox)
+    by_claim = {item.claim: item for item in assessment.evidence}
+    wrong = by_claim["Tumbes 90-day rainfall total 1460.8 mm"]
+    right = by_claim["Tumbes daily rainfall reached 150.8 mm"]
+    assert wrong.evidence_type == "uncertain"
+    assert right.evidence_type == "measured"
+
+
+# Checks the shared prompt tells bots to cite each location's own source.
+def test_prompt_requires_per_location_citations():
+    assert "that place's own source" in prompts.COMMON_RULES
+    assert "Piura" not in prompts.COMMON_RULES
+
+
+# Checks the same claim cited with differently worded names of one source merges.
+def test_duplicate_claims_with_different_source_wording_are_merged():
+    ledger = two_place_ledger()
+    claim = "Piura 90-day rainfall total 899 mm"
+    items = [
+        rainfall_claim(claim, PIURA_SOURCE),
+        rainfall_claim(claim, "Open-Meteo Piura daily precipitation"),
+    ]
+    assert len(provenance.verify_evidence(items, ledger)) == 1
