@@ -154,3 +154,12 @@ invalidates previous reviews; unchanged editions reuse them. **Update events wit
 Grok** checks immediately and retries failed reviews. Updates run while the app is
 open, not as a system-wide scheduled service. NOAA coverage is primarily tropical;
 these forecasts are not current observations, confirmed disasters, or local warnings.
+
+The globe also includes a labeled **San Diego heat wave · early October 2026**
+marker. Click it or **San Diego heat wave · open report** to read observations,
+reported impacts, local weather drivers, and the evidence for El Niño's broader
+influence. This dated retrospective remains available if NOAA or Grok is offline.
+The downloadable report is also in `reports/san_diego_heat_october_2026.md`.
+**Review San Diego report with Grok** runs a reporter and attribution reviewer on
+the cited evidence. An invalid xAI key is reported explicitly; the app retains
+the sourced report without substituting generated damage or attribution claims.

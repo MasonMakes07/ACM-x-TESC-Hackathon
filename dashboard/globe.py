@@ -76,22 +76,29 @@ function loadGlobeLibrary() {
 
 // Creates one interactive instance, keeping event selection wired back to Python.
 function createGlobe(Globe, container, setTriggerValue) {
-  const pick = (item) => { if (item && item.anomaly_id) setTriggerValue("selected", item.anomaly_id); };
+  const pick = (item, event) => {
+    if (!item?.anomaly_id) return;
+    event?.stopPropagation?.();
+    globe.controls().autoRotate = false;
+    container.style.cursor = "pointer";
+    setTriggerValue("selected", item.anomaly_id);
+  };
+  const hover = item => { container.style.cursor = item?.anomaly_id ? "pointer" : "grab"; };
   const globe = Globe()(container)
     .width(container.clientWidth).height(container.clientHeight)
     .globeImageUrl("https://threejs.org/examples/textures/planets/earth_atmos_2048.jpg")
     .bumpImageUrl(TEXTURES + "/earth-topology.png")
     .backgroundColor("#e6eadf")
     .showAtmosphere(true).atmosphereColor("#72b5ef").atmosphereAltitude(0.12)
-    .pointLat("lat").pointLng("lng").pointColor("color").pointAltitude(0.012)
-    .pointRadius("radius").pointLabel("tooltip").onPointClick(pick)
+    .pointLat("lat").pointLng("lng").pointColor("color").pointAltitude(0.022)
+    .pointRadius("radius").pointLabel("tooltip").onPointClick(pick).onPointHover(hover)
     .labelLat("lat").labelLng("lng").labelText("label").labelColor("color")
-    .labelSize(1.1).labelDotRadius(0).labelAltitude(0.025).onLabelClick(pick)
+    .labelSize(1.1).labelDotRadius(0).labelAltitude(0.025).onLabelClick(pick).onLabelHover(hover)
     .pathPoints("coords").pathPointLat((p) => p[0]).pathPointLng((p) => p[1])
     .pathColor("color").pathStroke(1.6).pathLabel("name")
     .polygonGeoJsonGeometry("geometry").polygonCapColor("fill").polygonStrokeColor("color")
     .polygonSideColor(() => "rgba(0,0,0,0)").polygonAltitude(d => d.selected ? 0.012 : 0.006)
-    .polygonLabel("tooltip").onPolygonClick(pick).polygonsTransitionDuration(0)
+    .polygonLabel("tooltip").onPolygonClick(pick).onPolygonHover(hover).polygonsTransitionDuration(0)
     .ringLat("lat").ringLng("lng").ringColor((d) => () => d.color)
     .ringMaxRadius("maxRadius").ringPropagationSpeed(1).ringRepeatPeriod(2000);
   const state = { globe, view: null, timer: null, rotate: true, pulses: true, rings: [], interacting: false,
@@ -123,7 +130,14 @@ export default function (component) {
     if (!state) { state = createGlobe(Globe, container, setTriggerValue); instances.set(parentElement, state); }
     const { globe } = state;
     state.rotate = data.rotate; state.pulses = data.pulses; state.rings = data.rings;
-    globe.polygonsData(data.polygons || []);
+    // Polling changes review text, not source geometry. Avoid triangulating every
+    // polygon again on each timer tick, which can block pointer input.
+    const polygons = data.polygons || [];
+    const polygonKey = polygons.map(p => p.anomaly_id + ':' + Boolean(p.selected)).join('|');
+    if (state.polygonKey !== polygonKey) {
+      globe.polygonsData(polygons);
+      state.polygonKey = polygonKey;
+    }
     globe.pointsData(data.points).labelsData(data.points.filter((p) => p.region)).pathsData(data.outlines);
     state.sync(); fallback.style.display = "none";
     if (state.view !== data.view_key) {

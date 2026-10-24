@@ -130,10 +130,17 @@ class HazardMonitor:
                 try:
                     reviewed = future.result()
                 except Exception as error:
-                    message = f'Grok review failed ({type(error).__name__}). Refresh to retry; NOAA source details are still available.'
+                    auth_failed = 'incorrect api key' in str(error).lower() or 'invalid api key' in str(error).lower() or 'HTTP 401' in str(error)
+                    message = ('xAI rejected the API key. Update XAI_API_KEY in .env and restart the app to enable Grok reviews.' if auth_failed else f'Grok review failed ({type(error).__name__}). Refresh to retry; NOAA source details are still available.')
                     with self.lock:
                         self.review_errors.update({event.event_id: message for event in batch})
                     self._log('Grok bots', message)
+                    if auth_failed:
+                        with self.lock:
+                            self.error = message
+                        for queued in jobs:
+                            queued.cancel()
+                        break
                 else:
                     with self.lock:
                         self.reviews.update(reviewed)
