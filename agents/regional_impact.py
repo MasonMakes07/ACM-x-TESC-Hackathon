@@ -1,4 +1,4 @@
-"""Regional Impact Analyst agent: assesses implications for the anomaly's location.
+"""Impact Bot: estimates, qualitatively, who or what could be affected.
 
 Owner: Person 2 (Grok Agent Intelligence). Pacific records are assessed for Piura
 and Tumbes; worldwide records only for their own grid-cell location.
@@ -13,7 +13,7 @@ from agents.runner import ChatClient, ProgressCallback, emit, run_agent
 from agents.toolbox import AgentToolbox
 from schemas.anomaly import AnomalyRecord
 
-AGENT_NAME = "Regional Impact Analyst"
+AGENT_NAME = "Impact Bot"
 TOOLS_BY_PROFILE = {
     "pacific": (
         "get_rainfall_history",

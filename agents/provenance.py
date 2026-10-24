@@ -6,10 +6,15 @@ Owner: Person 2 (Grok Agent Intelligence).
 import re
 from collections.abc import Iterable
 
-from agents.agent_models import AgentEvidence, SkepticIssue
+from agents.agent_models import (
+    AgentEvidence,
+    AlternativeExplanation,
+    Exposure,
+    SkepticIssue,
+)
 from agents.ledger import EvidenceLedger
 from schemas.anomaly import AnomalyRecord
-from schemas.assessment import ConfidenceLevel, EvidenceItem
+from schemas.assessment import AlertLevel, ConfidenceLevel, EvidenceItem
 
 CONFIDENCE_ORDER: tuple[ConfidenceLevel, ...] = (
     "inconclusive",
@@ -17,6 +22,7 @@ CONFIDENCE_ORDER: tuple[ConfidenceLevel, ...] = (
     "moderate",
     "high",
 )
+ALERT_ORDER: tuple[AlertLevel, ...] = ("informational", "monitor", "elevated")
 OVERREACH_PATTERN = re.compile(
     r"\b(caused by|will cause|will flood|will result in|will lead to|"
     r"guarantee[sd]?|certainly|definitely|undoubtedly|proves?|inevitabl[ey])\b",
@@ -28,6 +34,46 @@ UNVERIFIED_NOTE = "Source was not retrieved during this investigation; unverifie
 # Returns the lowest of the given confidence levels.
 def lowest_confidence(*levels: ConfidenceLevel) -> ConfidenceLevel:
     return min(levels, key=CONFIDENCE_ORDER.index)
+
+
+# Formats an alternative explanation as one display line (also used for checks).
+def format_alternative(alternative: AlternativeExplanation) -> str:
+    parts = [
+        f"Alternative explanation [{alternative.status}]: {alternative.explanation}"
+    ]
+    if alternative.evidence_for:
+        parts.append(f"For: {alternative.evidence_for}")
+    if alternative.evidence_against:
+        parts.append(f"Against: {alternative.evidence_against}")
+    return " ".join(parts)
+
+
+# Formats an exposure as one display line (also used for checks).
+def format_exposure(exposure: Exposure) -> str:
+    detail = f"basis: {exposure.basis}"
+    if exposure.uncertainty:
+        detail += f"; uncertainty: {exposure.uncertainty}"
+    return f"{exposure.who_or_what}: {exposure.possible_effect} ({detail})"
+
+
+# Returns the highest alert level the evidence justifies (the Action Bot's ceiling).
+def max_alert_level(
+    anomaly_status: str, confidence: ConfidenceLevel, signal_reproduced: bool
+) -> tuple[AlertLevel, str]:
+    if anomaly_status != "detected":
+        return "informational", f"the record's status is '{anomaly_status}'"
+    if not signal_reproduced:
+        return "informational", "the Sentinel Bot could not reproduce the signal"
+    if confidence == "inconclusive":
+        return "informational", "the assessment is inconclusive"
+    if confidence == "low":
+        return "monitor", "confidence is low"
+    return "elevated", f"the signal is detected with {confidence} confidence"
+
+
+# Returns the lower of two alert levels.
+def lowest_alert(first: AlertLevel, second: AlertLevel) -> AlertLevel:
+    return min(first, second, key=ALERT_ORDER.index)
 
 
 # Joins an optional existing note with a new one.

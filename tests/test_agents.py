@@ -13,6 +13,7 @@ import numpy as np
 import pandas as pd
 import pytest
 import requests
+from pydantic import ValidationError
 
 import translator
 from agents import briefing, provenance, workflow
@@ -27,10 +28,12 @@ from agents.agent_models import (
 from agents.grok_client import GrokClient
 from agents.ledger import EvidenceLedger, LedgerSource
 from agents.runner import extract_json, run_agent
+from agents.sentinel import monitor, same_sign_run
 from agents.skeptic import review
 from agents.toolbox import MAX_TEXT_CHARS, AgentToolbox
 from data import climate_sources, rainfall_sources, weather_sources
 from schemas.anomaly import AnomalyRecord
+from schemas.assessment import Assessment
 from schemas.errors import TranslatorError
 
 # Captured at import time because the stubbed_backend fixture replaces it.
@@ -42,10 +45,11 @@ LATER_TODAY = date(2024, 6, 1)
 OFFICIAL_NAME = "NOAA CPC ENSO Diagnostic Discussion"
 OVERREACHING_CLAIM = "The warm anomaly will cause flooding in Piura."
 
-INVESTIGATOR = "You are the Climate Investigator"
-IMPACT_ANALYST = "You are the Regional Impact Analyst"
+INVESTIGATOR = "You are the Investigator Bot"
+IMPACT_ANALYST = "You are the Impact Bot"
 SKEPTIC = "You are the Skeptic / Verifier"
 REVISER = "You revise an EarthWatch draft"
+ACTION = "You are the Action Bot"
 
 OBSERVATION_ARGS = {
     "region": "Nino 1+2",
@@ -100,7 +104,10 @@ class ScriptedClient:
                 self.calls.append((marker, list(messages), tools))
                 if not queue:
                     raise AssertionError(f"No scripted reply left for {marker!r}")
-                return queue.pop(0)
+                reply = queue.pop(0)
+                if isinstance(reply, Exception):
+                    raise reply
+                return reply
         raise AssertionError("Unrecognised agent system prompt.")
 
     # Counts how many times one agent was called.
@@ -152,16 +159,55 @@ def investigation_payload(**overrides) -> dict:
         ],
         "supporting_findings": ["The index has stayed positive for six months."],
         "contradictory_findings": [],
+        "alternative_explanations": [
+            {
+                "explanation": "Normal year-to-year variability",
+                "evidence_against": "The index stayed positive for six months.",
+                "status": "unsupported",
+            },
+            {
+                "explanation": "A data or reanalysis artifact",
+                "evidence_against": "The Sentinel Bot reproduced the value.",
+                "status": "unsupported",
+            },
+        ],
         "open_questions": ["Will the anomaly persist into the rainy season?"],
         "proposed_confidence": "moderate",
     }
     return {**payload, **overrides}
 
 
-# Builds a valid Regional Impact JSON payload with optional overrides.
+# Builds a valid Action Bot JSON payload with optional overrides.
+def action_payload(**overrides) -> dict:
+    payload = {
+        "alert_level": "monitor",
+        "alert_headline": "Warm ocean signal under watch",
+        "alert_message": "A warm anomaly was measured; confidence is moderate.",
+        "report": "The index was measured above baseline; alternatives remain open.",
+        "contingency_plan": [
+            {
+                "trigger": "The anomaly persists into next month",
+                "action": "Re-run the investigation and review the NOAA outlook",
+                "rationale": "Persistence would strengthen the signal",
+            }
+        ],
+        "monitoring_triggers": ["A new NOAA ENSO discussion is published"],
+    }
+    return {**payload, **overrides}
+
+
+# Builds a valid Impact Bot JSON payload with optional overrides.
 def impact_payload(**overrides) -> dict:
     payload = {
         "regional_implications": ["Rainfall in Piura may warrant monitoring."],
+        "exposures": [
+            {
+                "who_or_what": "Coastal agriculture",
+                "possible_effect": "Possible waterlogging if heavy rain persists",
+                "basis": "Rainfall history retrieved for Piura",
+                "uncertainty": "No exposure or land-use data is available",
+            }
+        ],
         "evidence": [],
         "limitations": ["Rainfall history covers one location only."],
         "recommended_next_steps": ["Check the next SENAMHI rainfall outlook."],
@@ -201,6 +247,7 @@ def happy_path_client(**script_overrides) -> ScriptedClient:
         ],
         SKEPTIC: [text_reply(verification_payload())],
         REVISER: [],
+        ACTION: [text_reply(action_payload())],
     }
     scripts.update(script_overrides)
     return ScriptedClient(scripts)
@@ -209,6 +256,17 @@ def happy_path_client(**script_overrides) -> ScriptedClient:
 # =============================================================================
 # Fixtures
 # =============================================================================
+
+# Fails any test that reaches Person 1's real data sources without faking them.
+@pytest.fixture(autouse=True)
+def block_unpatched_data_sources(monkeypatch) -> None:
+    # Fails loudly (pytest.fail is not an Exception, so tools cannot swallow it).
+    def fail_if_called(*args, **kwargs):
+        pytest.fail("A test reached a real data source without faking it.")
+
+    monkeypatch.setattr(climate_sources, "get_sst_series", fail_if_called)
+    monkeypatch.setattr(rainfall_sources, "get_rainfall_history", fail_if_called)
+    monkeypatch.setattr(weather_sources, "get_weather_history", fail_if_called)
 
 # Provides a detected anomaly for tests (no dependence on Person 1's code).
 @pytest.fixture
@@ -247,6 +305,8 @@ def working_data(monkeypatch) -> None:
             "value": [round(-0.8 + 0.2 * step, 2) for step in range(18)],
         }
     )
+    # The anomaly under test is 2.8 on 2023-06-01; the Sentinel must reproduce it.
+    sst_series.loc[sst_series["date"] == "2023-06-01", "value"] = 2.8
     rainfall_dates = pd.date_range("2023-03-01", "2023-06-30")
     rainfall_series = pd.DataFrame(
         {"date": rainfall_dates, "value": [1.0] * len(rainfall_dates)}
@@ -801,11 +861,11 @@ def test_workflow_progress_events(anomaly, toolbox, working_data):
     _, events = run_with_fakes(anomaly, happy_path_client(), toolbox)
     agents_in_order = list(dict.fromkeys(event.agent for event in events))
     assert agents_in_order == [
-        "Ocean Sentinel",
-        "Climate Investigator",
-        "Regional Impact Analyst",
+        "Sentinel Bot",
+        "Investigator Bot",
+        "Impact Bot",
         "Skeptic / Verifier",
-        "Briefing",
+        "Action Bot",
     ]
     messages = [event.message for event in events]
     assert "get_climate_observations: ok" in messages
@@ -933,7 +993,7 @@ def test_workflow_insufficient_evidence_is_inconclusive(anomaly, toolbox, workin
 
 
 # Checks invalid structured output twice raises instead of inventing a result.
-def test_workflow_invalid_agent_output_raises(anomaly, toolbox):
+def test_workflow_invalid_agent_output_raises(anomaly, toolbox, working_data):
     client = ScriptedClient(
         {INVESTIGATOR: [{"content": "nonsense"}, {"content": "still nonsense"}]}
     )
@@ -1202,6 +1262,7 @@ def local_client(**script_overrides) -> ScriptedClient:
         ],
         SKEPTIC: [text_reply(verification_payload())],
         REVISER: [],
+        ACTION: [text_reply(action_payload())],
     }
     scripts.update(script_overrides)
     return ScriptedClient(scripts)
@@ -1435,7 +1496,7 @@ def test_workflow_local_record(local_anomaly, local_toolbox, working_data):
         assert "Piura" not in messages[0]["content"]
         assert "ENSO Diagnostic" not in messages[0]["content"]
     assert "latitude -1.2864" in client.calls[0][1][1]["content"]
-    assert events[0].agent == "Climate Sentinel"
+    assert events[0].agent == "Sentinel Bot"
     assert assessment.anomaly_id == local_anomaly.anomaly_id
     weather_evidence = [e for e in assessment.evidence if e.source == LOCAL_SOURCE_NAME]
     assert weather_evidence[0].evidence_type == "measured"
@@ -1473,6 +1534,7 @@ def test_workflow_unknown_region(anomaly, toolbox):
             IMPACT_ANALYST: [text_reply(impact_payload())],
             SKEPTIC: [text_reply(verification_payload())],
             REVISER: [],
+            ACTION: [text_reply(action_payload())],
         }
     )
     assessment, _ = run_with_fakes(odd_record, client, toolbox)
@@ -1548,3 +1610,272 @@ def test_translator_investigate_location_with_real_workflow(
     assert not is_sample
     assert assessment.anomaly_id == local_anomaly.anomaly_id
     assert events
+
+
+# =============================================================================
+# Four-bot workflow: Sentinel, Investigator, Impact, Action
+# =============================================================================
+
+# Runs the Sentinel Bot alone and returns its report.
+def run_sentinel(record, toolbox):
+    events = []
+    report = monitor(toolbox, record, build_context(record), events.append)
+    return report, events
+
+
+# Checks the Sentinel reproduces a Pacific SST record and measures persistence.
+def test_sentinel_confirms_sst_record(anomaly, toolbox, working_data):
+    report, events = run_sentinel(anomaly, toolbox)
+    assert report.status == "confirmed"
+    assert report.same_sign_run_months >= 2
+    assert [event.agent for event in events] == ["Sentinel Bot", "Sentinel Bot"]
+    assert "confirmed" in events[-1].message
+
+
+# Checks a record whose value cannot be reproduced is reported as a mismatch.
+def test_sentinel_detects_mismatch(anomaly, toolbox, working_data):
+    wrong_record = anomaly.model_copy(update={"value": 9.9})
+    report, _ = run_sentinel(wrong_record, toolbox)
+    assert report.status == "mismatch"
+    assert "could not be reproduced" in report.detail
+
+
+# Checks unavailable source data leaves the signal unverified, never confirmed.
+def test_sentinel_unverified_when_data_missing(anomaly, toolbox, missing_data):
+    report, _ = run_sentinel(anomaly, toolbox)
+    assert report.status == "unverified"
+    assert toolbox.ledger.unavailable
+
+
+# Checks worldwide monthly records are re-checked against ERA5 monthly values.
+def test_sentinel_checks_local_month(local_anomaly, local_toolbox, working_data):
+    confirmed, _ = run_sentinel(local_anomaly, local_toolbox)
+    assert confirmed.status == "confirmed"
+    wrong = local_anomaly.model_copy(update={"value": 99.0})
+    mismatch, _ = run_sentinel(wrong, local_toolbox)
+    assert mismatch.status == "mismatch"
+
+
+# Checks an incomplete month is unverified instead of being guessed.
+def test_sentinel_incomplete_local_month_is_unverified(
+    local_anomaly, local_toolbox, monkeypatch
+):
+    frame = make_weather_frame(pd.date_range("2022-03-01", "2023-03-31"))
+    frame.loc[frame["date"] == "2023-03-10", "precipitation"] = np.nan
+    monkeypatch.setattr(
+        weather_sources, "get_weather_history", lambda place, start, end: frame
+    )
+    report, _ = run_sentinel(local_anomaly, local_toolbox)
+    assert report.status == "unverified"
+
+
+# Checks a Peru seven-day rainfall record is re-summed from daily rainfall.
+def test_sentinel_checks_peru_rainfall(anomaly, toolbox, working_data):
+    rain_record = anomaly.model_copy(
+        update={
+            "region": "Piura",
+            "variable": "Seven-day precipitation total",
+            "value": 7.0,
+            "unit": "mm/7 days",
+        }
+    )
+    report, _ = run_sentinel(rain_record, toolbox)
+    assert report.status == "confirmed"
+
+
+# Checks unsupported regions are unverified without any data call.
+def test_sentinel_unsupported_region(anomaly, toolbox):
+    report, events = run_sentinel(
+        anomaly.model_copy(update={"region": "Atlantis"}), toolbox
+    )
+    assert report.status == "unverified"
+    assert not toolbox.ledger.sources
+
+
+# Checks the same-sign run counts only the latest consecutive same-sign values.
+@pytest.mark.parametrize(
+    ("values", "expected"),
+    [
+        ([-1, 1, 2, 3], 3),
+        ([1, 0, 1], 1),
+        ([], 0),
+        ([0], 0),
+        ([-2, -1], 2),
+        ([1, -1], 1),
+    ],
+)
+def test_same_sign_run(values, expected):
+    assert same_sign_run(values) == expected
+
+
+# Checks all four bots run in order and the Action Bot has no data tools.
+def test_four_bot_order_and_action_inputs(anomaly, toolbox, working_data):
+    client = happy_path_client()
+    assessment, events = run_with_fakes(anomaly, client, toolbox)
+    assert events[0].agent == "Sentinel Bot"
+    assert events[-1].agent == "Action Bot"
+    called = [marker for marker, _, _ in client.calls]
+    assert called.index(INVESTIGATOR) < called.index(IMPACT_ANALYST)
+    assert called.index(IMPACT_ANALYST) < called.index(SKEPTIC)
+    assert called.index(SKEPTIC) < called.index(ACTION)
+    action_call = [call for call in client.calls if call[0] == ACTION][0]
+    assert action_call[2] is None
+    action_prompt = action_call[1][1]["content"]
+    assert "Maximum allowed alert level: elevated" in action_prompt
+    assert "Final confidence: moderate" in action_prompt
+    investigator_prompt = client.calls[0][1][1]["content"]
+    assert "Sentinel Bot check (confirmed)" in investigator_prompt
+
+
+# Checks the Action Bot's alert, report and contingency plan reach the assessment.
+def test_action_plan_in_assessment(anomaly, toolbox, working_data):
+    assessment, _ = run_with_fakes(anomaly, happy_path_client(), toolbox)
+    plan = assessment.action_plan
+    assert plan.alert_level == "monitor"
+    assert plan.alert_headline.startswith("Warm ocean signal")
+    assert plan.contingency_plan[0].trigger == "The anomaly persists into next month"
+    assert plan.monitoring_triggers
+    assert "not an official warning" in plan.disclaimer
+    assert "elevated" in plan.level_reason
+
+
+# Checks alternative explanations and exposures are surfaced for the dashboard.
+def test_alternatives_and_exposures_in_assessment(anomaly, toolbox, working_data):
+    assessment, _ = run_with_fakes(anomaly, happy_path_client(), toolbox)
+    contradictory = " ".join(assessment.contradictory_findings)
+    assert "Alternative explanation [unsupported]: Normal year-to-year" in contradictory
+    implications = " ".join(assessment.regional_implications)
+    assert "Coastal agriculture: Possible waterlogging" in implications
+    assert "basis: Rainfall history retrieved for Piura" in implications
+    assert briefing.FEW_ALTERNATIVES_LIMITATION not in assessment.limitations
+
+
+# Checks a draft with fewer than two alternatives is disclosed as a limitation.
+def test_few_alternatives_is_disclosed(anomaly, toolbox, working_data):
+    client = happy_path_client(
+        **{
+            INVESTIGATOR: [
+                tool_reply(("fetch_official_source", OFFICIAL_ARGS)),
+                text_reply(investigation_payload(alternative_explanations=[])),
+            ],
+            IMPACT_ANALYST: [text_reply(impact_payload())],
+        }
+    )
+    assessment, _ = run_with_fakes(anomaly, client, toolbox)
+    assert briefing.FEW_ALTERNATIVES_LIMITATION in assessment.limitations
+
+
+# Checks the code lowers an Action Bot alert that exceeds what the evidence allows.
+def test_alert_level_is_clamped_by_confidence(anomaly, toolbox, missing_data):
+    client = happy_path_client(
+        **{ACTION: [text_reply(action_payload(alert_level="elevated"))]}
+    )
+    assessment, _ = run_with_fakes(anomaly, client, toolbox)
+    assert assessment.confidence == "low"
+    plan = assessment.action_plan
+    assert plan.alert_level == "monitor"
+    assert "was lowered" in plan.level_reason
+
+
+# Checks a signal the Sentinel cannot reproduce is capped at low and informational.
+def test_sentinel_mismatch_caps_confidence_and_alert(anomaly, toolbox, working_data):
+    wrong_record = anomaly.model_copy(update={"value": 9.9})
+    client = happy_path_client(
+        **{ACTION: [text_reply(action_payload(alert_level="elevated"))]}
+    )
+    assessment, _ = run_with_fakes(wrong_record, client, toolbox)
+    assert assessment.confidence == "low"
+    assert assessment.action_plan.alert_level == "informational"
+    assert any("could not reproduce" in text for text in assessment.limitations)
+
+
+# Checks records below the detection threshold never get more than informational.
+def test_non_detected_status_is_informational(anomaly, toolbox, working_data):
+    quiet_record = anomaly.model_copy(update={"status": "monitoring"})
+    client = happy_path_client(
+        **{ACTION: [text_reply(action_payload(alert_level="elevated"))]}
+    )
+    assessment, _ = run_with_fakes(quiet_record, client, toolbox)
+    assert assessment.action_plan.alert_level == "informational"
+
+
+# Checks causal language in the Action Bot's output is flagged as unverified.
+def test_action_overreach_is_flagged(anomaly, toolbox, working_data):
+    risky = action_payload(
+        alert_message="The anomaly will cause flooding in Piura.",
+        contingency_plan=[
+            {
+                "trigger": "Rain starts",
+                "action": "This definitely proves flooding is coming",
+                "rationale": "Persistence",
+            }
+        ],
+    )
+    client = happy_path_client(**{ACTION: [text_reply(risky)]})
+    assessment, _ = run_with_fakes(anomaly, client, toolbox)
+    plan = assessment.action_plan
+    assert plan.alert_message.startswith("[Unverified] ")
+    assert plan.contingency_plan[0].action.startswith("[Unverified] ")
+    assert not plan.alert_headline.startswith("[Unverified]")
+
+
+# Checks invalid Action Bot output degrades gracefully instead of failing the run.
+def test_action_failure_still_returns_assessment(anomaly, toolbox, working_data):
+    client = happy_path_client(
+        **{ACTION: [{"content": "not json"}, {"content": "still not json"}]}
+    )
+    assessment, events = run_with_fakes(anomaly, client, toolbox)
+    assert assessment.action_plan is None
+    assert any("Action Bot's plan is unavailable" in t for t in assessment.limitations)
+    assert any("Action plan unavailable" in event.message for event in events)
+
+
+# Checks a Grok API error during the Action step also degrades gracefully.
+def test_action_api_error_still_returns_assessment(anomaly, toolbox, working_data):
+    client = happy_path_client(**{ACTION: [GrokError("HTTP 500 secret detail")]})
+    assessment, _ = run_with_fakes(anomaly, client, toolbox)
+    assert assessment.action_plan is None
+    assert "secret detail" not in " ".join(assessment.limitations)
+
+
+# Checks the alert-level ceiling rules directly.
+@pytest.mark.parametrize(
+    ("status", "confidence", "reproduced", "expected"),
+    [
+        ("detected", "high", True, "elevated"),
+        ("detected", "moderate", True, "elevated"),
+        ("detected", "low", True, "monitor"),
+        ("detected", "inconclusive", True, "informational"),
+        ("detected", "high", False, "informational"),
+        ("monitoring", "high", True, "informational"),
+        ("inconclusive", "high", True, "informational"),
+    ],
+)
+def test_max_alert_level(status, confidence, reproduced, expected):
+    level, reason = provenance.max_alert_level(status, confidence, reproduced)
+    assert level == expected
+    assert reason
+
+
+# Checks Assessment stays backward compatible and validates action plans strictly.
+def test_assessment_schema_compatibility():
+    base = {
+        "anomaly_id": "x_1",
+        "summary": "Old-style assessment",
+        "confidence": "low",
+    }
+    assert Assessment.model_validate(base).action_plan is None
+    bad_plan = {
+        "alert_level": "panic",
+        "level_reason": "r",
+        "alert_headline": "h",
+        "alert_message": "m",
+        "report": "r",
+        "disclaimer": "d",
+    }
+    with pytest.raises(ValidationError):
+        Assessment.model_validate({**base, "action_plan": bad_plan})
+    with pytest.raises(ValidationError):
+        Assessment.model_validate(
+            {**base, "action_plan": {**bad_plan, "alert_level": "monitor", "extra": 1}}
+        )

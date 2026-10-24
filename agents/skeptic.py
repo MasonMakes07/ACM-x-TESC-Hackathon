@@ -7,7 +7,7 @@ deterministic overreach check so causal claims are caught even if Grok misses th
 from agents.agent_models import ImpactReport, InvestigationReport, VerificationReport
 from agents.ledger import EvidenceLedger
 from agents.prompts import SKEPTIC_PROMPT
-from agents.provenance import flag_overreach
+from agents.provenance import flag_overreach, format_alternative, format_exposure
 from agents.runner import ChatClient, ProgressCallback, emit, run_agent
 from schemas.anomaly import AnomalyRecord
 
@@ -24,6 +24,8 @@ def draft_statements(
         *impact.regional_implications,
         *impact.recommended_next_steps,
         *(item.claim for item in investigation.evidence + impact.evidence),
+        *(format_alternative(item) for item in investigation.alternative_explanations),
+        *(format_exposure(item) for item in impact.exposures),
     ]
 
 
@@ -35,12 +37,14 @@ def review(
     impact: ImpactReport,
     ledger: EvidenceLedger,
     on_progress: ProgressCallback,
+    sentinel_summary: str = "",
 ) -> VerificationReport:
     emit(on_progress, AGENT_NAME, "Reviewing the draft for unsupported conclusions.")
     code_flags = flag_overreach(draft_statements(investigation, impact))
     flagged_text = "\n".join(f"- {issue.claim}" for issue in code_flags) or "- none"
     user_prompt = (
         f"Detected anomaly record:\n{anomaly.model_dump_json(indent=2)}\n"
+        f"{sentinel_summary}\n"
         f"{ledger.describe()}\n"
         f"Draft investigation:\n{investigation.model_dump_json(indent=2)}\n"
         f"Draft regional impact:\n{impact.model_dump_json(indent=2)}\n"

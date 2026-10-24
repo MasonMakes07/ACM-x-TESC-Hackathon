@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 EvidenceType = Literal["measured", "reported", "inferred", "uncertain"]
 ConfidenceLevel = Literal["low", "moderate", "high", "inconclusive"]
+AlertLevel = Literal["informational", "monitor", "elevated"]
 
 
 # =============================================================================
@@ -30,6 +31,37 @@ class EvidenceItem(BaseModel):
 
 
 # =============================================================================
+# ContingencyStep
+# =============================================================================
+
+# One conditional response: if the trigger is observed, consider the action.
+class ContingencyStep(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    trigger: str = Field(min_length=1)
+    action: str = Field(min_length=1)
+    rationale: str = Field(min_length=1)
+
+
+# =============================================================================
+# ActionPlan
+# =============================================================================
+
+# The Action Bot's alert, short report and contingency plan (decision support only).
+class ActionPlan(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    alert_level: AlertLevel
+    level_reason: str = Field(min_length=1)
+    alert_headline: str = Field(min_length=1)
+    alert_message: str = Field(min_length=1)
+    report: str = Field(min_length=1)
+    contingency_plan: list[ContingencyStep] = Field(default_factory=list)
+    monitoring_triggers: list[str] = Field(default_factory=list)
+    disclaimer: str = Field(min_length=1)
+
+
+# =============================================================================
 # Assessment
 # =============================================================================
 
@@ -46,6 +78,7 @@ class Assessment(BaseModel):
     confidence: ConfidenceLevel
     limitations: list[str] = Field(default_factory=list)
     recommended_next_steps: list[str] = Field(default_factory=list)
+    action_plan: ActionPlan | None = None
 
 
 # =============================================================================

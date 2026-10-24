@@ -16,5 +16,21 @@
   "regional_implications": ["SAMPLE regional implication for Piura."],
   "confidence": "inconclusive",
   "limitations": ["This is sample data, not an investigation result."],
-  "recommended_next_steps": ["Implement agents/workflow.py run_investigation()."]
+  "recommended_next_steps": ["Implement agents/workflow.py run_investigation()."],
+  "action_plan": {
+    "alert_level": "informational",
+    "level_reason": "SAMPLE: confidence is inconclusive, so the level is capped.",
+    "alert_headline": "SAMPLE ALERT - not a real signal",
+    "alert_message": "SAMPLE: placeholder alert text for building the dashboard.",
+    "report": "SAMPLE: placeholder one-paragraph report for building the dashboard.",
+    "contingency_plan": [
+      {
+        "trigger": "SAMPLE: the anomaly persists for another month",
+        "action": "SAMPLE: re-run the investigation and review official outlooks",
+        "rationale": "SAMPLE: persistence would strengthen the signal"
+      }
+    ],
+    "monitoring_triggers": ["SAMPLE: a new official outlook is published"],
+    "disclaimer": "SAMPLE: decision support only; not an official warning."
+  }
 }

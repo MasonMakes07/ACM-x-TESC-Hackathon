@@ -519,6 +519,14 @@ The workflow in practice
    The dashboard displays the final report with evidence and uncertainty.
 
 If the Skeptic identifies a substantive error, allow one revision cycle. Repeatedly asking agents to reconsider their conclusions can waste time and API budget without improving the result.
+Implemented agent workflow (agents/workflow.py, Person 2)
+The four bots are implemented as follows. The Skeptic / Verifier sits between the Impact Bot and the Action Bot so that the Action Bot only works from verified findings.
+1. Sentinel Bot (code, no LLM): re-checks the detected signal against source data, reports whether the record's value reproduces (confirmed / mismatch / unverified) and how persistent it is.
+2. Investigator Bot: researches the signal with data tools and must test at least two alternative explanations (natural variability, data artifact, another climate mode), marking each supported, unsupported or untested.
+3. Impact Bot: estimates, qualitatively, who or what could be affected. Every exposure needs a basis and an uncertainty; no counts, probabilities or casualty estimates.
+4. Skeptic / Verifier and Reviser: challenge the draft; one revision cycle at most.
+5. Action Bot: turns the verified findings into an alert, a short report and a contingency plan (Assessment.action_plan). It has no data tools and cannot add facts.
+Code enforces the limits: the alert level can never exceed what the confidence, the record's status and the Sentinel check justify; causal or certainty language is marked [Unverified]; if the Action Bot fails, the rest of the assessment is still returned and the gap is disclosed. Person 3: render assessment.action_plan (alert_level, alert_headline, alert_message, report, contingency_plan, monitoring_triggers, level_reason, disclaimer) on the Regional Impact screen; sample_data/assessment.json contains an example.
 7. Build the dashboard around an investigation
 Your interface should make the project feel like a real product.
 
