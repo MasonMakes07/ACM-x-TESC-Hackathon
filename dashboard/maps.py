@@ -1,4 +1,4 @@
-"""Map of the monitored Pacific region and Peru locations (Tier 2 feature).
+"""World map with monitored climate regions and labeled reference locations.
 
 Owner: Person 3 (Product & Dashboard).
 """
@@ -58,16 +58,15 @@ def region_map(selected_region: str | None = None) -> go.Figure:
     )
     figure.add_trace(_locations_trace())
     figure.update_geos(
-        projection_type="natural earth",
-        lataxis_range=[-20, 15], lonaxis_range=[-180, -65],
-        showland=True, landcolor="#1E2B3C",
-        showocean=True, oceancolor="#0E1A2A",
-        showcountries=True, countrycolor="#3A4A60",
-        showcoastlines=True, coastlinecolor="#4A5C74",
+        scope="world", projection_type="natural earth", center={"lat": 0, "lon": 0},
+        lataxis_range=[-90, 90], lonaxis_range=[-180, 180],
+        showland=True, landcolor="#263746", showocean=True, oceancolor="#0C2434",
+        showcountries=True, countrycolor="#526779", showcoastlines=True,
+        coastlinecolor="#7C92A3", showlakes=False, showframe=True, framecolor="#526779",
         bgcolor="rgba(0,0,0,0)",
     )
     figure.update_layout(
-        title="Monitored regions", showlegend=True,
+        title="Worldwide climate observations", showlegend=True, height=520,
         legend={"orientation": "h", "y": -0.05},
     )
     return apply_dark_layout(figure)

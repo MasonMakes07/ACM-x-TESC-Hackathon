@@ -96,3 +96,14 @@ def test_region_map_highlights_selected():
 def test_region_map_unknown_region(region):
     figure = region_map(region)
     assert all(trace.fill == "none" for trace in figure.data if trace.name in REGION_BOXES)
+
+
+# Keeps a global viewport even when a Pacific region is selected.
+@pytest.mark.parametrize("region", [None, "Nino 1+2", "Nino 3.4"])
+def test_region_map_shows_the_whole_world(region: str | None) -> None:
+    geo = region_map(region).layout.geo
+    assert geo.scope == "world"
+    assert geo.projection.type == "natural earth"
+    assert tuple(geo.lataxis.range) == (-90, 90)
+    assert tuple(geo.lonaxis.range) == (-180, 180)
+    assert geo.showcountries
