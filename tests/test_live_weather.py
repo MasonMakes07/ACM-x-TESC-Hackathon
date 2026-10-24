@@ -118,14 +118,20 @@ def button(app, label):
     return next(item for item in app.button if item.label == label)
 
 
+# Opens the worldwide view and selects coordinate entry, finding radios by option, not position.
+def open_coordinates_view():
+    app = AppTest.from_file(APP).run()
+    app.radio(key='monitoring_view').set_value('Worldwide locations').run()
+    return next(item for item in app.radio if 'Coordinates' in item.options).set_value('Coordinates').run()
+
+
 def test_live_ui_load_refresh_and_location_change(source, monkeypatch):
     calls = []
     def load(location, *, refresh=False):
         calls.append(refresh)
         return live_weather.get_live_weather(location, refresh=refresh)
     monkeypatch.setattr(translator, 'load_live_weather', load)
-    app = AppTest.from_file(APP).run()
-    app.radio[1].set_value('Coordinates').run()
+    app = open_coordinates_view()
     app.text_input[0].set_value('San Diego').run()
     button(app, "Load today's weather").click().run()
     assert not app.exception
@@ -140,8 +146,7 @@ def test_live_ui_load_refresh_and_location_change(source, monkeypatch):
 
 
 def test_live_ui_failure_clears_previous_conditions(source, monkeypatch):
-    app = AppTest.from_file(APP).run()
-    app.radio[1].set_value('Coordinates').run()
+    app = open_coordinates_view()
     button(app, "Load today's weather").click().run()
     assert app.metric and not app.exception
     def unavailable(*a, **k): raise TranslatorError('Live source unavailable')
@@ -159,8 +164,7 @@ def test_live_ui_investigates_current_snapshot(source,monkeypatch):
         record=translator.live_weather_record(weather)
         return Assessment(anomaly_id=record.anomaly_id,summary='Current San Diego weather verified',confidence='moderate')
     monkeypatch.setattr(translator,'investigate_live_weather',investigate)
-    app=AppTest.from_file(APP).run()
-    app.radio[1].set_value('Coordinates').run()
+    app = open_coordinates_view()
     button(app,"Load today's weather").click().run()
     button(app,"Investigate today's weather with Grok").click().run()
     assert not app.exception

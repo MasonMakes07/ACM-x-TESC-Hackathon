@@ -143,3 +143,51 @@ def test_investigate_rejects_bad_workflow_output(stubbed_backend, fake_workflow)
     stubbed_backend.setattr(translator.workflow, "run_investigation", fake_workflow)
     with pytest.raises(TranslatorError):
         translator.investigate_anomaly(SAMPLE_ID, lambda event: None)
+
+
+# Worldwide region names reach the climate source when real observations are available.
+@pytest.mark.parametrize('region', ['Indian Ocean', 'Mediterranean', 'São Paulo'])
+def test_load_series_accepts_worldwide_regions(stubbed_backend, region):
+    calls = []
+    series = pd.DataFrame({'date': ['2023-06-01'], 'value': [1.2]})
+
+    # Records which global region was requested without making any API call.
+    def source(selected_region):
+        calls.append(selected_region)
+        return series
+
+    stubbed_backend.setattr(translator.climate_sources, 'get_sst_series', source)
+    result, is_sample = translator.load_observation_series(region)
+    assert calls == [region]
+    assert not is_sample
+    assert result['value'].iloc[0] == 1.2
+
+
+# Sample Pacific measurements must not be silently reused for another part of the world.
+def test_unbuilt_global_source_does_not_relabel_pacific_sample():
+    with pytest.raises(TranslatorError, match='No observations have been supplied'):
+        translator.load_observation_series('Indian Ocean')
+
+
+# Checks a Grok service failure tells the user why, without hiding it behind a generic message.
+def test_investigation_failure_explains_grok_refusal(stubbed_backend):
+    from agents.agent_errors import GrokError
+
+    def refuse(*args, **kwargs):
+        raise GrokError("Grok API returned HTTP 403: team has no credits")
+
+    stubbed_backend.setattr(translator.workflow, "run_investigation", refuse)
+    anomaly_id = translator.load_anomalies()[0][0].anomaly_id
+    with pytest.raises(TranslatorError, match="no credits"):
+        translator.investigate_anomaly(anomaly_id, lambda event: None)
+
+
+# Checks a missing API key is reported by name instead of as a generic failure.
+def test_investigation_failure_reports_missing_key(stubbed_backend):
+    def missing(*args, **kwargs):
+        raise RuntimeError("Missing XAI_API_KEY. Copy .env.example to .env and set it.")
+
+    stubbed_backend.setattr(translator.workflow, "run_investigation", missing)
+    anomaly_id = translator.load_anomalies()[0][0].anomaly_id
+    with pytest.raises(TranslatorError, match="XAI_API_KEY"):
+        translator.investigate_anomaly(anomaly_id, lambda event: None)
