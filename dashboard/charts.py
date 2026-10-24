@@ -139,3 +139,41 @@ def anomaly_comparison_chart(anomalies: list[AnomalyRecord], selected_id: str | 
         figure.update_yaxes(title_text=unit, row=row, col=1)
     figure.update_layout(height=max(280, 260 * len(groups)), showlegend=False)
     return apply_dark_layout(figure)
+
+
+# Builds a tide-gauge chart: observed water vs NOAA's predicted tide, flood threshold, highest water.
+def water_level_chart(levels: pd.DataFrame, anomaly: AnomalyRecord, minor_flood_m: float | None) -> go.Figure:
+    rows = levels.dropna(subset=["observed_m"]) if not levels.empty else levels
+    title = f"{anomaly.region.split(' (')[0]}: water level vs predicted tide"
+    if rows.empty:
+        return _empty_chart(title, "m above MHHW")
+    figure = go.Figure()
+    figure.add_trace(go.Scatter(
+        x=rows["time"], y=rows["predicted_m"], name="NOAA predicted tide", mode="lines",
+        line={"color": "#8b9bb0", "dash": "dot", "width": 1},
+        hovertemplate="%{x|%Y-%m-%d %H:%M} UTC<br>Predicted %{y:.2f} m<extra></extra>",
+    ))
+    figure.add_trace(go.Scatter(
+        x=rows["time"], y=rows["observed_m"], name="Observed water level", mode="lines",
+        line={"color": LINE_COLOR, "width": 1.5},
+        hovertemplate=(
+            "%{x|%Y-%m-%d %H:%M} UTC<br>Observed %{y:.2f} m"
+            f"<br>Source: {escape(anomaly.source)}<extra></extra>"
+        ),
+    ))
+    if minor_flood_m is not None:
+        figure.add_hline(
+            y=minor_flood_m, line_dash="dash", line_color=THRESHOLD_COLOR,
+            annotation_text=f"NOAA minor flood threshold {minor_flood_m:+.2f} m",
+            annotation_position="top left",
+        )
+    event_day = rows[rows["time"].dt.date == anomaly.observation_date]
+    highest = (event_day if not event_day.empty else rows).loc[lambda frame: frame["observed_m"].idxmax()]
+    figure.add_trace(go.Scatter(
+        x=[highest["time"]], y=[highest["observed_m"]], mode="markers", name="This event's highest water",
+        marker={"size": 13, "color": ANOMALY_COLOR, "line": {"width": 2, "color": "white"}},
+        hovertemplate=f"Highest water %{{y:.2f}} m<br>{anomaly.value:+.2f} m above predicted tide<extra></extra>",
+    ))
+    figure.update_layout(title=title, yaxis_title="m above MHHW", hovermode="x unified",
+                         legend={"orientation": "h", "y": -0.2})
+    return apply_dark_layout(figure)

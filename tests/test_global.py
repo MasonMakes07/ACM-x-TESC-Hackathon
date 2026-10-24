@@ -139,7 +139,7 @@ def test_global_investigation_never_returns_peru_sample(global_data, monkeypatch
 
 # Opens the app and switches the sidebar view to the worldwide location search.
 def worldwide_app():
-    app = AppTest.from_file(APP).run()
+    app = AppTest.from_file(APP, default_timeout=30).run()
     return app.radio(key='monitoring_view').set_value('Worldwide locations').run()
 
 

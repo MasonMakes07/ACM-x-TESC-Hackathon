@@ -14,7 +14,7 @@ def _crash(*args, **kwargs):
 
 def pacific_app():
     app = AppTest.from_file(APP_PATH, default_timeout=30).run()
-    return app.radio[0].set_value('Pacific ocean indices').run()
+    return app.radio[0].set_value('Climate events globe').run()
 
 
 # Opens the globe dashboard with automatic explanations off, for tests of the manual button flow.
@@ -22,7 +22,7 @@ def manual_app():
     app = AppTest.from_file(APP_PATH, default_timeout=30)
     app.session_state["auto_explain"] = False
     app.run()
-    return app.radio[0].set_value('Pacific ocean indices').run()
+    return app.radio[0].set_value('Climate events globe').run()
 
 
 def test_app_renders_and_investigates_in_sample_mode():
@@ -162,7 +162,7 @@ def test_non_sst_event_does_not_call_sst_source(stubbed_backend):
 def test_default_view_is_the_globe_dashboard_with_globe_controls():
     app = AppTest.from_file(APP_PATH, default_timeout=30).run()
     assert not app.exception
-    assert app.radio(key="monitoring_view").value == 'Pacific ocean indices'
+    assert app.radio(key="monitoring_view").value == 'Climate events globe'
     assert any('Worldwide climate events' in item.value for item in app.caption)
     assert len(app.toggle) == 3
 

@@ -12,7 +12,7 @@ from agents.agent_models import (
     InvestigationReport,
     VerificationReport,
 )
-from agents.context import AnomalyContext, is_live_weather
+from agents.context import AnomalyContext, is_coastal_water_level, is_live_weather
 from agents.ledger import EvidenceLedger
 from agents.provenance import (
     completeness_cap,
@@ -46,6 +46,10 @@ LOCAL_NEXT_STEP = (
     "for this location."
 )
 NO_OFFICIAL_REPORT_LIMITATION = "No official NOAA assessment was retrieved."
+COASTAL_LIMITATION = (
+    "Based on one NOAA tide gauge and model wind and pressure. The flood threshold is NOAA's "
+    "minor high-tide-flooding level, not an official warning; check the local NWS office."
+)
 SINGLE_SOURCE_LIMITATION = (
     "Based on one ERA5 reanalysis grid cell; no independent source corroborates it."
 )
@@ -188,7 +192,8 @@ def build_assessment(
                 if expects_official_report and not ledger.has_official_report()
                 else []
             ),
-            *([] if expects_official_report or is_live_weather(anomaly) else [SINGLE_SOURCE_LIMITATION]),
+            *([] if expects_official_report or is_live_weather(anomaly) or is_coastal_water_level(anomaly) else [SINGLE_SOURCE_LIMITATION]),
+            *([COASTAL_LIMITATION] if is_coastal_water_level(anomaly) else []),
             *(['Current model estimates and station readings have different coverage and timestamps; this is not a historical anomaly assessment.'] if is_live_weather(anomaly) else []),
             *_sentinel_limitations(sentinel),
             *(

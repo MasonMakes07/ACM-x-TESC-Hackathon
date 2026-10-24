@@ -16,7 +16,7 @@ from agents.action import act
 from agents.agent_errors import AgentOutputError, GrokError
 from agents.agent_models import ActionReport
 from agents.briefing import alert_ceiling, build_assessment, final_confidence
-from agents.context import build_context, infer_as_of_date, is_live_weather
+from agents.context import build_context, coastal_station, infer_as_of_date, is_coastal_water_level, is_live_weather
 from agents.grok_client import GrokClient
 from agents.investigator import investigate
 from agents.ledger import EvidenceLedger, LedgerSource
@@ -54,6 +54,13 @@ def run_investigation(
         if selected.latitude is None:
             raise ValueError('Live investigations require selected coordinates')
         toolbox = LiveWeatherToolbox(EvidenceLedger(),infer_as_of_date(anomaly),Location(selected.place,selected.latitude,selected.longitude))
+    if toolbox is None and is_coastal_water_level(anomaly):
+        from agents.coastal_tools import CoastalToolbox
+        where = build_context(anomaly)
+        if where.latitude is None:
+            raise ValueError("Coastal investigations require the gauge coordinates in the region")
+        toolbox = CoastalToolbox(EvidenceLedger(), infer_as_of_date(anomaly), coastal_station(anomaly),
+                                 where.latitude, where.longitude)
     toolbox = toolbox or AgentToolbox(EvidenceLedger(), infer_as_of_date(anomaly))
     ledger = toolbox.ledger
     context = build_context(anomaly)

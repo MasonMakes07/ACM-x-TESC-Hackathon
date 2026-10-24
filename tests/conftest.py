@@ -20,4 +20,5 @@ def stubbed_backend(monkeypatch):
     )
     monkeypatch.setattr(translator.climate_sources, "get_sst_series", _not_implemented)
     monkeypatch.setattr(translator.workflow, "run_investigation", _not_implemented)
+    monkeypatch.setattr(translator.coastal_detection, "detect_coastal_events", _not_implemented)
     return monkeypatch

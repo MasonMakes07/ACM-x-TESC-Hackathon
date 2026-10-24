@@ -6,17 +6,21 @@ Owner: Person 3 (Product & Dashboard). Talks to the backend only via translator.
 from dataclasses import dataclass, field
 from datetime import date
 
+import re
+
 import pandas as pd
 import streamlit as st
 
 import translator
 from dashboard import components
-from dashboard.charts import anomaly_comparison_chart, observation_chart
+from dashboard.charts import anomaly_comparison_chart, observation_chart, water_level_chart
 from dashboard.maps import region_map
 from dashboard.explanation import render_explanation
 from dashboard.globe import render_globe
 from dashboard.sources import sources_panel
 from dashboard.theme import apply_theme
+from dashboard.tutorial_overlay import render_tutorial, tutorial_button
+from analysis.coastal_detection import COASTAL_VARIABLE
 from schemas.anomaly import AnomalyRecord
 from schemas.assessment import Assessment, ProgressEvent
 from schemas.errors import TranslatorError
@@ -25,7 +29,7 @@ TAB_NAMES = ("Overview", "Climate Explorer", "Investigation", "Regional Briefing
 DEFAULT_THRESHOLD = 1.0
 CACHE_SECONDS = 600
 VIEW_KEY = "monitoring_view"
-GLOBE_VIEW = "Pacific ocean indices"
+GLOBE_VIEW = "Climate events globe"
 WORLD_VIEW = "Worldwide locations"
 AUTO_KEY = "auto_explain"
 REGION_KEY = "region_select"
@@ -44,7 +48,47 @@ class InvestigationResult:
 # Loads anomalies once per cache window so slider moves don't re-run the pipeline.
 @st.cache_data(ttl=CACHE_SECONDS, show_spinner="Loading anomalies...")
 def cached_anomalies() -> tuple[list[AnomalyRecord], bool]:
-    return translator.load_anomalies()
+    return translator.load_events()
+
+
+# Loads a coastal event's tide-gauge history once per cache window.
+@st.cache_data(ttl=CACHE_SECONDS, show_spinner="Loading tide-gauge history...")
+def cached_coastal_history(anomaly: AnomalyRecord) -> tuple[pd.DataFrame, float | None]:
+    return translator.load_coastal_history(anomaly)
+
+
+COORDINATES = re.compile(r"\((-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)\)\s*$")
+
+
+# Maps each event region that carries "(lat, lon)" to its coordinates, for the globe.
+def region_coordinates(anomalies: list[AnomalyRecord]) -> dict[str, tuple[float, float]]:
+    found = {}
+    for anomaly in anomalies:
+        match = COORDINATES.search(anomaly.region)
+        if match:
+            lat, lon = float(match.group(1)), float(match.group(2))
+            if -90 <= lat <= 90 and -180 <= lon <= 180:
+                found[anomaly.region] = (lat, lon)
+    return found
+
+
+# Builds the history chart for an event: tide gauge for coastal events, the index series for SST.
+def history_figure(
+    selected: AnomalyRecord, series: pd.DataFrame | None, threshold: float, replay_until: date | None
+):
+    if selected.variable == COASTAL_VARIABLE:
+        try:
+            levels, minor_flood_m = cached_coastal_history(selected)
+        except TranslatorError as error:
+            st.error(str(error))
+            return None
+        return water_level_chart(levels, selected, minor_flood_m)
+    if series is None:
+        return None
+    return observation_chart(
+        series, f"{selected.region} {selected.variable}", selected.unit,
+        anomaly=selected, threshold=threshold, replay_until=replay_until,
+    )
 
 
 # Loads a region's observation series once per cache window.
@@ -61,7 +105,7 @@ def show_sample_banner(section_name: str) -> None:
 # Formats an anomaly as a one-line label for the selector.
 def anomaly_label(anomaly: AnomalyRecord) -> str:
     return (
-        f"{anomaly.region} | {anomaly.observation_date} | "
+        f"{place_name(anomaly.region)} | {anomaly.observation_date} | "
         f"{anomaly.value} {anomaly.unit} | {anomaly.status}"
     )
 
@@ -105,7 +149,7 @@ def demo_controls(
 def event_filters(anomalies: list[AnomalyRecord]) -> list[AnomalyRecord]:
     regions = sorted({item.region for item in anomalies})
     dates = [item.observation_date for item in anomalies]
-    selected = st.sidebar.multiselect("Regions to include", regions, default=regions, key="region_filter")
+    selected = st.sidebar.multiselect("Regions to include", regions, default=regions, key="region_filter", format_func=place_name)
     period = st.sidebar.date_input("Observation period", value=(min(dates), max(dates)), key="period_filter")
     if len(period) != 2:
         st.info("Select the end date to finish the observation period.")
@@ -124,11 +168,23 @@ def prepare_guided_demo(anomalies: list[AnomalyRecord]) -> None:
     st.session_state["guided_pending"] = selected.anomaly_id
 
 
+# Returns a region's place name without the "(lat, lon)" suffix used to place it on the globe.
+def place_name(region: str) -> str:
+    return COORDINATES.sub("", region).strip() or region
+
+
+# Opens the page on the most notable event: detected first, then the most recent.
+def default_region(anomalies: list[AnomalyRecord]) -> str:
+    return max(anomalies, key=lambda item: (item.status == "detected", item.observation_date)).region
+
+
 # Picks a region, then an anomaly in that region, from the sidebar.
 def select_anomaly(anomalies: list[AnomalyRecord]) -> AnomalyRecord:
     st.sidebar.header("Demo controls")
     regions = sorted({anomaly.region for anomaly in anomalies})
-    region = st.sidebar.selectbox("Region", regions, key=REGION_KEY)
+    if st.session_state.get(REGION_KEY) not in regions:
+        st.session_state[REGION_KEY] = default_region(anomalies)
+    region = st.sidebar.selectbox("Region", regions, key=REGION_KEY, format_func=place_name)
     in_region = [anomaly for anomaly in anomalies if anomaly.region == region]
     return st.sidebar.selectbox(
         "Anomaly", in_region, format_func=anomaly_label, key=ANOMALY_KEY
@@ -189,14 +245,23 @@ def severity_controls(anomalies: list[AnomalyRecord], is_sample: bool) -> dict[s
     return levels
 
 
-# Renders the clicked event: what happened, the agents' latest update, and their sources.
-def render_event_panel(selected: AnomalyRecord, result: InvestigationResult | None, severity: str | None = None) -> None:
-    st.subheader(f"{selected.region}: {selected.variable.replace('_', ' ')}")
+# Renders the clicked event: what happened and its history, before the agents run.
+def render_event_header(selected: AnomalyRecord, figure, severity: str | None = None) -> None:
+    st.subheader(f"{place_name(selected.region)}: {selected.variable.replace('_', ' ')}")
     components.severity_alert(severity)
     st.write(
         f"{selected.value:+g} {selected.unit} on {selected.observation_date} "
         f"(baseline {selected.baseline_period}) · status: {selected.status}"
     )
+    if figure is not None:
+        st.plotly_chart(figure, width="stretch", key="event_history",
+                        alt=f"History of {selected.variable} at {selected.region}")
+    else:
+        st.caption("No historical series is available for this event.")
+
+
+# Renders what the agents found for the clicked event: the explanation and their sources.
+def render_event_findings(selected: AnomalyRecord, result: InvestigationResult | None) -> None:
     assessment = result.assessment if result else None
     render_explanation(assessment, bool(result and result.is_sample))
     if assessment is not None:
@@ -220,28 +285,21 @@ def render_overview(
         components.anomaly_card(anomaly, anomaly.anomaly_id == selected.anomaly_id, severity=(severities or {}).get(anomaly.anomaly_id))
 
 
-# Renders the Climate Explorer tab: the observation chart and the anomaly detail view.
+# Renders the Climate Explorer tab: the event history chart and the anomaly detail view.
 def render_explorer(
     selected: AnomalyRecord,
-    series: pd.DataFrame | None,
+    figure,
     series_is_sample: bool,
-    threshold: float,
     replay_until: date | None,
     severity: str | None = None,
 ) -> None:
-    if series is None:
-        st.info("Observations are unavailable for this region right now.")
+    if figure is None:
+        st.info("Observations are unavailable for this event right now.")
     else:
         if series_is_sample:
             show_sample_banner("Observations")
-        st.plotly_chart(
-            observation_chart(
-                series, f"{selected.region} {selected.variable}", selected.unit,
-                anomaly=selected, threshold=threshold, replay_until=replay_until,
-            ),
-            width="stretch",
-        )
-        if replay_until and replay_until < selected.observation_date:
+        st.plotly_chart(figure, width="stretch", key="explorer_history")
+        if replay_until and replay_until < selected.observation_date and selected.variable != COASTAL_VARIABLE:
             st.caption(
                 f"Replay is at {replay_until}. Move the slider to {selected.observation_date} "
                 "to reach the detected anomaly."
@@ -318,7 +376,7 @@ def render_page() -> None:
         from dashboard.global_explorer import render_global_explorer
         render_global_explorer(render_assessment)
         return
-    st.caption("Worldwide climate events and anomaly awareness · explore evidence, uncertainty, and recommended actions")
+    st.caption("Worldwide climate events: ocean indices, coastal water levels and more · click an event to see its history and why it is happening")
     try:
         anomalies, anomalies_are_sample = cached_anomalies()
     except TranslatorError as error:
@@ -354,10 +412,12 @@ def render_page() -> None:
     globe_column, dashboard_column = st.columns([3, 2], gap="medium")
     with globe_column:
         render_globe(visible, selected.region, select_from_globe,
-                     region_locations=st.session_state.get("region_locations"),
+                     region_locations={**region_coordinates(visible), **(st.session_state.get("region_locations") or {})},
                      severity_by_anomaly={item.anomaly_id: severities[item.anomaly_id] for item in visible if item.anomaly_id in severities})
         st.caption(f"Selected signal: {anomaly_label(selected)}")
     with dashboard_column:
+        figure = history_figure(selected, series, threshold, replay_until)
+        render_event_header(selected, figure, severity)
         pending = st.session_state.pop("guided_pending", None)
         if st.button("Run Investigation", type="primary", width="stretch", key="run_investigation") or pending == selected.anomaly_id:
             run_investigation(selected)
@@ -366,12 +426,12 @@ def render_page() -> None:
         result = stored_results().get(selected.anomaly_id)
         if result is not None and result.error:
             st.error(result.error)
-        render_event_panel(selected, result, severity)
+        render_event_findings(selected, result)
         overview, explorer, investigation, briefing = st.tabs(TAB_NAMES)
         with overview:
             render_overview(visible, anomalies_are_sample, selected, {item.anomaly_id: severities[item.anomaly_id] for item in visible if item.anomaly_id in severities})
         with explorer:
-            render_explorer(selected, series, series_is_sample, threshold, replay_until, severity)
+            render_explorer(selected, figure, series_is_sample, replay_until, severity)
         with investigation:
             render_investigation(selected, result)
         with briefing:
@@ -382,16 +442,18 @@ def render_page() -> None:
 def view_switch() -> None:
     st.sidebar.radio(
         "Monitoring view", [GLOBE_VIEW, WORLD_VIEW], key=VIEW_KEY,
-        help="Pacific ocean indices is the globe dashboard. Worldwide locations searches any place.",
+        help="Climate events globe shows detected events worldwide. Worldwide locations searches any place.",
     )
 
 
 # Builds the full EarthWatch page; the view switch is always drawn last in the sidebar.
 def main() -> None:
     try:
+        tutorial_button()
         render_page()
     finally:
         view_switch()
+        render_tutorial(st.session_state.get(VIEW_KEY, GLOBE_VIEW) == WORLD_VIEW)
 
 
 main()

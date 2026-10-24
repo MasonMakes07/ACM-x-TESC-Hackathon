@@ -19,7 +19,7 @@ import pandas as pd
 from pydantic import BaseModel, ValidationError
 
 from agents import workflow
-from analysis import anomaly_detection
+from analysis import anomaly_detection, coastal_detection
 from data import climate_sources
 from schemas.anomaly import SERIES_COLUMNS, AnomalyRecord
 from schemas.assessment import Assessment, ProgressEvent
@@ -78,6 +78,45 @@ def load_anomalies() -> tuple[list[AnomalyRecord], bool]:
     return anomalies, False
 
 
+# Returns unusual coastal water levels; a failing gauge network never breaks the page.
+def _load_coastal_events() -> list[AnomalyRecord]:
+    try:
+        raw_events = coastal_detection.detect_coastal_events()
+    except NotImplementedError:
+        return []
+    except Exception:
+        logger.exception("detect_coastal_events() failed")
+        return []
+    return [_validate(AnomalyRecord, item, "Coastal event") for item in raw_events]
+
+
+# Returns every event the globe shows (climate pipeline + coastal gauges) and the sample flag.
+def load_events() -> tuple[list[AnomalyRecord], bool]:
+    anomalies, is_sample = load_anomalies()
+    return anomalies + _load_coastal_events(), is_sample
+
+
+# Returns 30 days of observed vs predicted water levels ending on a coastal event's day.
+def load_coastal_history(anomaly: AnomalyRecord, days: int = 30) -> tuple[pd.DataFrame, float | None]:
+    from datetime import time, timedelta
+
+    from agents.context import coastal_station, is_coastal_water_level
+    from data.coastal_sources import get_station_levels
+
+    if not is_coastal_water_level(anomaly):
+        raise TranslatorError("This event has no tide-gauge history.")
+    end = min(
+        datetime.combine(anomaly.observation_date + timedelta(days=1), time.min, timezone.utc),
+        datetime.now(timezone.utc).replace(second=0, microsecond=0),
+    )
+    try:
+        data = get_station_levels(coastal_station(anomaly), end - timedelta(days=days), end)
+    except Exception as error:
+        logger.exception("Coastal history for %s failed", anomaly.anomaly_id)
+        raise TranslatorError("Could not load the tide-gauge history for this event.") from error
+    return data.levels, data.minor_flood_m
+
+
 # Returns a region's observation series (date, value) and whether it is sample data.
 def load_observation_series(region: str) -> tuple[pd.DataFrame, bool]:
     if not isinstance(region, str) or not region.strip() or not REGION_PATTERN.fullmatch(region):
@@ -123,7 +162,7 @@ def investigate_anomaly(
         anomaly_id
     ):
         raise TranslatorError("Invalid anomaly id.")
-    anomalies, _ = load_anomalies()
+    anomalies, _ = load_events()
     anomaly = next(
         (item for item in anomalies if item.anomaly_id == anomaly_id), None
     )

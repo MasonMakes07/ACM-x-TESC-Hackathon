@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Literal
 
+from analysis.coastal_detection import COASTAL_VARIABLE
 from schemas.anomaly import AnomalyRecord
 
 PACIFIC_INDEX_REGIONS = ("Nino 1+2", "Nino 3.4")
@@ -68,7 +69,7 @@ def build_context(anomaly: AnomalyRecord) -> AnomalyContext:
 # Returns the last date whose data was available when the anomaly was observed.
 def infer_as_of_date(anomaly: AnomalyRecord) -> date:
     observed = anomaly.observation_date
-    if is_live_weather(anomaly):
+    if is_live_weather(anomaly) or is_coastal_water_level(anomaly):
         return observed
     is_monthly_value = observed.day == 1 and "7 days" not in anomaly.unit
     if not is_monthly_value:
@@ -79,3 +80,16 @@ def infer_as_of_date(anomaly: AnomalyRecord) -> date:
 
 def is_live_weather(anomaly: AnomalyRecord) -> bool:
     return anomaly.variable == 'Current air temperature' and anomaly.source == 'https://api.open-meteo.com/v1/forecast'
+
+
+COASTAL_SOURCE_PREFIX = "https://tidesandcurrents.noaa.gov/waterlevels.html?id="
+
+
+# True for a NOAA tide-gauge record of water standing above the predicted tide.
+def is_coastal_water_level(anomaly: AnomalyRecord) -> bool:
+    return anomaly.variable == COASTAL_VARIABLE and anomaly.source.startswith(COASTAL_SOURCE_PREFIX)
+
+
+# Returns the NOAA station id of a coastal record.
+def coastal_station(anomaly: AnomalyRecord) -> str:
+    return anomaly.source[len(COASTAL_SOURCE_PREFIX):]

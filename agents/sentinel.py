@@ -13,7 +13,7 @@ from datetime import date, timedelta
 from typing import Literal
 
 from agents.context import AnomalyContext, PACIFIC_INDEX_REGIONS, PERU_LOCATIONS
-from agents.context import is_live_weather
+from agents.context import is_coastal_water_level, is_live_weather
 from agents.runner import ProgressCallback, emit
 from agents.toolbox import AgentToolbox
 from schemas.anomaly import AnomalyRecord
@@ -174,6 +174,18 @@ def _check_local_month(
     return _compare(actual, anomaly, f"ERA5 at {context.place}")
 
 
+# Re-checks a coastal record: the residual at that day's highest water at the same gauge.
+def _check_coastal(toolbox: AgentToolbox, anomaly: AnomalyRecord) -> SentinelReport:
+    day = anomaly.observation_date.isoformat()
+    result = json.loads(toolbox.execute("get_coastal_water_level", {"start_date": day, "end_date": day}))
+    if result.get("status") != "ok":
+        return _unverified(result.get("reason") or result.get("message") or "NOAA water levels were unavailable.")
+    actual = (result.get("highest_water") or {}).get("residual_m")
+    if actual is None:
+        return _unverified("NOAA has no tide prediction at the highest water, so the residual cannot be rebuilt.")
+    return _compare(actual, anomaly, result["source"])
+
+
 # Re-checks the detected signal and reports whether it reproduces from the data.
 def monitor(
     toolbox: AgentToolbox,
@@ -186,6 +198,8 @@ def monitor(
         result = json.loads(toolbox.execute('get_current_weather', {'latitude':context.latitude,'longitude':context.longitude}))
         actual = result.get('current',{}).get('temperature_2m')
         report = _compare(actual,anomaly,'Current model temperature') if result.get('status') == 'ok' and actual is not None else _unverified('Fresh current weather was unavailable.')
+    elif is_coastal_water_level(anomaly):
+        report = _check_coastal(toolbox, anomaly)
     elif anomaly.region in PACIFIC_INDEX_REGIONS:
         report = _check_sst_index(toolbox, anomaly)
     elif anomaly.region in PERU_LOCATIONS:
