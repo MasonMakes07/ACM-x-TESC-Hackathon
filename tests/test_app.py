@@ -148,3 +148,12 @@ def test_non_sst_event_does_not_call_sst_source(stubbed_backend):
     assert not app.exception
     assert calls == []
     assert any('Europe' in item.value for item in app.subheader)
+
+
+# The real default view includes the integrated globe and both motion controls.
+def test_default_view_is_the_globe_dashboard_with_globe_controls():
+    app = AppTest.from_file(APP_PATH, default_timeout=30).run()
+    assert not app.exception
+    assert app.radio(key="monitoring_view").value == 'Pacific ocean indices'
+    assert any('Worldwide climate events' in item.value for item in app.caption)
+    assert len(app.toggle) == 2

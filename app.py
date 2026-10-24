@@ -23,6 +23,9 @@ from schemas.errors import TranslatorError
 TAB_NAMES = ("Overview", "Climate Explorer", "Investigation", "Regional Briefing")
 DEFAULT_THRESHOLD = 1.0
 CACHE_SECONDS = 600
+VIEW_KEY = "monitoring_view"
+GLOBE_VIEW = "Pacific ocean indices"
+WORLD_VIEW = "Worldwide locations"
 REGION_KEY = "region_select"
 ANOMALY_KEY = "anomaly_select"
 
@@ -304,13 +307,12 @@ def render_assessment(assessment: Assessment, assessment_is_sample: bool) -> Non
     components.evidence_list(assessment.evidence)
 
 
-# Builds the full EarthWatch page.
-def main() -> None:
+# Builds the page body for whichever view is selected.
+def render_page() -> None:
     st.set_page_config(page_title="EarthWatch", page_icon="🌍", layout="wide")
     apply_theme()
     st.title("EarthWatch")
-    mode = st.radio("Monitoring view", ["Worldwide locations", "Pacific ocean indices"], horizontal=True)
-    if mode == "Worldwide locations":
+    if st.session_state.get(VIEW_KEY, GLOBE_VIEW) == WORLD_VIEW:
         from dashboard.global_explorer import render_global_explorer
         render_global_explorer(render_assessment)
         return
@@ -366,6 +368,22 @@ def main() -> None:
             render_investigation(selected, result)
         with briefing:
             render_briefing(selected, result, severity)
+
+
+# Draws the small sidebar switch between the globe dashboard and the worldwide location search.
+def view_switch() -> None:
+    st.sidebar.radio(
+        "Monitoring view", [GLOBE_VIEW, WORLD_VIEW], key=VIEW_KEY,
+        help="Pacific ocean indices is the globe dashboard. Worldwide locations searches any place.",
+    )
+
+
+# Builds the full EarthWatch page; the view switch is always drawn last in the sidebar.
+def main() -> None:
+    try:
+        render_page()
+    finally:
+        view_switch()
 
 
 main()

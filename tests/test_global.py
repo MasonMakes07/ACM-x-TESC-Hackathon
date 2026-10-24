@@ -137,14 +137,20 @@ def test_global_investigation_never_returns_peru_sample(global_data, monkeypatch
         translator.investigate_location(climate,'unrelated',lambda event:None)
 
 
+# Opens the app and switches the sidebar view to the worldwide location search.
+def worldwide_app():
+    app = AppTest.from_file(APP).run()
+    return app.radio(key='monitoring_view').set_value('Worldwide locations').run()
+
+
 def button(app, label):
     return next(item for item in app.button if item.label == label)
 
 
 def test_global_app_default_has_world_country_picker():
-    app = AppTest.from_file(APP).run()
+    app = worldwide_app()
     assert not app.exception
-    assert app.radio[0].value == 'Worldwide locations'
+    assert app.radio(key='monitoring_view').value == 'Worldwide locations'
     assert len(app.selectbox[0].options) >= 250
     assert button(app, 'Load climate data').disabled
 
@@ -152,8 +158,8 @@ def test_global_app_default_has_world_country_picker():
 def test_coordinate_ui_load_investigate_and_selection_change(global_data, monkeypatch):
     def stub(*a): raise NotImplementedError
     monkeypatch.setattr(translator.workflow, 'run_investigation', stub)
-    app = AppTest.from_file(APP).run()
-    app.radio[1].set_value('Coordinates').run()
+    app = worldwide_app()
+    app.radio[0].set_value('Coordinates').run()
     app.text_input[0].set_value('Tokyo').run()
     app.number_input[0].set_value(35.7)
     app.number_input[1].set_value(139.7)
@@ -174,7 +180,7 @@ def test_search_ui_country_and_place_flow(global_data, monkeypatch):
         captured.append((query, code))
         return [Location('Nairobi',-1.3,36.8,'Kenya','KE')]
     monkeypatch.setattr(translator,'search_world_locations',search)
-    app = AppTest.from_file(APP).run()
+    app = worldwide_app()
     kenya = next(item for item in countries() if item['code'] == 'KE')
     app.selectbox[0].set_value(kenya)
     app.text_input[0].set_value('Nairobi').run()
