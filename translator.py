@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 
 SAMPLE_DIR = Path(__file__).parent / "sample_data"
 ANOMALY_ID_PATTERN = re.compile(r"^[a-z0-9_]{1,64}$")
-ALLOWED_REGIONS = frozenset({"Nino 1+2", "Nino 3.4"})
+REGION_PATTERN = re.compile(r"^[\w +.,()\-]{1,100}$", re.UNICODE)
 
 ModelT = TypeVar("ModelT", bound=BaseModel)
 
@@ -79,12 +79,14 @@ def load_anomalies() -> tuple[list[AnomalyRecord], bool]:
 
 # Returns a region's observation series (date, value) and whether it is sample data.
 def load_observation_series(region: str) -> tuple[pd.DataFrame, bool]:
-    if region not in ALLOWED_REGIONS:
+    if not isinstance(region, str) or not region.strip() or not REGION_PATTERN.fullmatch(region):
         raise TranslatorError(f"Unsupported region: {region!r}.")
     is_mock = False
     try:
         series = climate_sources.get_sst_series(region)
     except NotImplementedError:
+        if region not in {item.region for item in _load_sample_anomalies()}:
+            raise TranslatorError(f"No observations have been supplied for {region}.")
         series = pd.read_csv(SAMPLE_DIR / "sst_series.csv")
         is_mock = True
     except Exception as error:

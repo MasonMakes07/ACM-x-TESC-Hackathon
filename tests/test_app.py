@@ -25,7 +25,7 @@ def test_app_renders_and_investigates_in_sample_mode():
     app = AppTest.from_file(APP_PATH, default_timeout=30).run()
     assert not app.exception
     assert app.title[0].value == "EarthWatch"
-    app.button[0].click().run()
+    app.button(key="run_investigation").click().run()
     assert not app.exception
     assert app.subheader
 
@@ -42,7 +42,7 @@ def test_app_shows_error_when_pipeline_fails(stubbed_backend):
 def test_app_shows_error_when_workflow_fails(stubbed_backend):
     stubbed_backend.setattr(translator.workflow, "run_investigation", _crash)
     app = AppTest.from_file(APP_PATH, default_timeout=30).run()
-    app.button[0].click().run()
+    app.button(key="run_investigation").click().run()
     assert not app.exception
     assert app.error
 
@@ -68,7 +68,7 @@ def test_app_has_four_tabs():
 def test_investigation_results_persist_across_reruns():
     app = AppTest.from_file(APP_PATH, default_timeout=30).run()
     assert "No investigation run yet" in app.tabs[2].info[0].value
-    app.button[0].click().run()
+    app.button(key="run_investigation").click().run()
     app.run()
     assert not app.exception
     assert any("Sample mode" in item.label for item in app.tabs[2].expander)
@@ -91,7 +91,7 @@ def test_demo_controls_change_without_errors():
 # Checks results are kept per anomaly: a different anomaly starts with an empty timeline.
 def test_results_are_kept_per_anomaly():
     app = AppTest.from_file(APP_PATH, default_timeout=30).run()
-    app.button[0].click().run()
+    app.button(key="run_investigation").click().run()
     app.sidebar.selectbox[0].set_value("Nino 3.4").run()
     assert "No investigation run yet" in app.tabs[2].info[0].value
     app.sidebar.selectbox[0].set_value("Nino 1+2").run()
@@ -112,7 +112,7 @@ def test_globe_selection_opens_that_event():
 def test_event_panel_shows_sources_after_investigation():
     app = AppTest.from_file(APP_PATH, default_timeout=30).run()
     assert any("No agent sources yet" in item.value for item in app.info)
-    app.button[0].click().run()
+    app.button(key="run_investigation").click().run()
     assert not app.exception
     assert any("SAMPLE sources" in item.value for item in app.warning)
     assert any("gave no link" in item.value for item in app.caption)

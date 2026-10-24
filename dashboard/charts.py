@@ -12,7 +12,7 @@ import plotly.graph_objects as go
 from schemas.anomaly import AnomalyRecord
 
 LINE_COLOR = "#5CC8FF"
-ANOMALY_COLOR = "#FF6B6B"
+ANOMALY_COLOR = "#B8C8D9"
 THRESHOLD_COLOR = "#FFD180"
 EMPTY_MESSAGE = "No observations in this period"
 
@@ -30,9 +30,13 @@ def apply_dark_layout(figure: go.Figure) -> go.Figure:
 
 # Returns only the rows on or before the replay date, or every row when it is None.
 def _replay_rows(series: pd.DataFrame, replay_until: date | None) -> pd.DataFrame:
+    tidy = series.copy()
+    tidy["date"] = pd.to_datetime(tidy["date"], errors="coerce", utc=True).dt.tz_convert(None)
+    tidy["value"] = pd.to_numeric(tidy["value"], errors="coerce")
+    tidy = tidy.dropna(subset=["date"]).sort_values("date")
     if replay_until is None:
-        return series
-    return series[series["date"] <= pd.Timestamp(replay_until)]
+        return tidy
+    return tidy[tidy["date"].dt.date <= replay_until]
 
 
 # Builds a figure with a centered message for when there is nothing to plot.
@@ -63,7 +67,7 @@ def _add_anomaly_marker(
     figure: go.Figure, plotted: pd.DataFrame, anomaly: AnomalyRecord
 ) -> None:
     observed_at = pd.Timestamp(anomaly.observation_date)
-    if not plotted["date"].min() <= observed_at <= plotted["date"].max():
+    if plotted.loc[plotted["date"].dt.date == anomaly.observation_date, "value"].dropna().empty:
         return
     figure.add_trace(
         go.Scatter(
@@ -90,8 +94,10 @@ def observation_chart(
     threshold: float | None = None,
     replay_until: date | None = None,
 ) -> go.Figure:
-    plotted = _replay_rows(series, replay_until).dropna(subset=["date"])
-    if plotted.empty:
+    if series.empty:
+        return _empty_chart(title, unit)
+    plotted = _replay_rows(series, replay_until)
+    if plotted.empty or not plotted["value"].notna().any():
         return _empty_chart(title, unit)
     source_line = f"<br>Source: {escape(anomaly.source)}" if anomaly else ""
     figure = go.Figure(
@@ -107,7 +113,29 @@ def observation_chart(
     figure.add_hline(y=0, line_dash="dot", line_color="#8b9bb0")
     if threshold is not None:
         _add_threshold(figure, threshold, unit)
-    if anomaly is not None:
+    if anomaly is not None and anomaly.unit == unit:
         _add_anomaly_marker(figure, plotted, anomaly)
     figure.update_layout(title=title, yaxis_title=unit, hovermode="closest")
+    return apply_dark_layout(figure)
+
+
+# Compares anomalies only within the same variable and unit, never across incompatible scales.
+def anomaly_comparison_chart(anomalies: list[AnomalyRecord], selected_id: str | None = None) -> go.Figure:
+    from plotly.subplots import make_subplots
+
+    if not anomalies:
+        return _empty_chart("No anomalies to compare", "")
+    groups: dict[tuple[str, str], list[AnomalyRecord]] = {}
+    for item in anomalies:
+        groups.setdefault((item.variable, item.unit), []).append(item)
+    figure = make_subplots(rows=len(groups), cols=1, subplot_titles=[f"{variable.replace('_', ' ')} ({unit})" for variable, unit in groups])
+    for row, ((variable, unit), records) in enumerate(groups.items(), 1):
+        figure.add_trace(go.Bar(
+            x=[f"{item.region} · {item.observation_date}" for item in records], y=[item.value for item in records],
+            name=variable.replace("_", " "), marker_color=["#8DDCF0" if item.anomaly_id == selected_id else "#94A3B8" for item in records],
+            customdata=[[str(item.observation_date), escape(item.source)] for item in records],
+            hovertemplate=f"%{{x}}<br>%{{y:g}} {escape(unit)}<br>Source: %{{customdata[1]}}<extra></extra>",
+        ), row=row, col=1)
+        figure.update_yaxes(title_text=unit, row=row, col=1)
+    figure.update_layout(height=max(280, 260 * len(groups)), showlegend=False)
     return apply_dark_layout(figure)

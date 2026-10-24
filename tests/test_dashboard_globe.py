@@ -48,8 +48,8 @@ def test_only_anomaly_markers_carry_an_id():
 def test_selected_region_is_highlighted():
     anomalies = [_anomaly("Nino 1+2"), _anomaly("Nino 3.4", anomaly_id="globe_002", status="monitoring")]
     data = globe_data(anomalies, "Nino 3.4")
-    assert len(data["rings"]) == 1
-    highlighted = [item["name"] for item in data["outlines"] if item["color"] == "#ff6b6b"]
+    assert data["rings"] == []  # Selection does not imply risk severity.
+    highlighted = [item["name"] for item in data["outlines"] if item["color"] == "#8ddcf0"]
     assert highlighted == ["Nino 3.4"]
     assert data["view"]["lng"] == pytest.approx(-145)
     assert data["view_key"] == "Nino 3.4"

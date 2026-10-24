@@ -172,7 +172,7 @@ def anomaly_detail(anomaly: AnomalyRecord, *, severity: str | None = None) -> No
         st.caption(
             f"Anomaly magnitude: {_measurement(anomaly)} relative to the source's "
             "baseline. Positive means above the baseline; negative means below. "
-            "The absolute temperature and baseline mean are not supplied in this record."
+            "The absolute observed value and baseline mean are not supplied in this record."
         )
     else:
         st.caption("Anomaly magnitude and baseline mean are not supplied in this record.")
@@ -275,7 +275,7 @@ def briefing(assessment: Assessment, anomaly: AnomalyRecord, *, severity: str | 
     _findings(assessment.recommended_next_steps, "No next steps supplied.")
     st.markdown("### Limitations")
     _findings(assessment.limitations, "No limitations supplied. This does not establish certainty.")
-    st.caption("EarthWatch investigates unusual conditions. An ocean-temperature anomaly alone cannot establish a specific flood forecast.")
+    st.caption("EarthWatch investigates climate events and unusual conditions worldwide. An anomaly alone does not establish a specific disaster forecast.")
 
 
 # Builds worldwide navigation and accepts precise locations from any backend feed.

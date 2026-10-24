@@ -19,9 +19,9 @@ PERU_LOCATIONS: dict[str, tuple[float, float]] = {
     "Chiclayo": (-6.77, -79.84),
     "Trujillo": (-8.11, -79.03),
 }
-SELECTED_COLOR = "#FF6B6B"
+SELECTED_COLOR = "#8DDCF0"
 DIM_COLOR = "#5C6B80"
-LOCATION_COLOR = "#70E1BB"
+LOCATION_COLOR = "#94A3B8"
 
 
 # Draws one region box as a closed outline, filled and bright when selected.
@@ -34,7 +34,7 @@ def _region_trace(name: str, box: tuple[float, float, float, float], selected: b
         mode="lines", name=name,
         line={"color": color, "width": 3 if selected else 1.5},
         fill="toself" if selected else "none",
-        fillcolor="rgba(255,107,107,0.25)",
+        fillcolor="rgba(141,220,240,0.20)",
         hoverinfo="name",
     )
 

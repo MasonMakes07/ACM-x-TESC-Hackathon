@@ -11,7 +11,8 @@ import streamlit as st
 
 import translator
 from dashboard import components
-from dashboard.charts import observation_chart
+from dashboard.charts import anomaly_comparison_chart, observation_chart
+from dashboard.maps import region_map
 from dashboard.globe import render_globe
 from dashboard.sources import sources_panel
 from dashboard.theme import apply_theme
@@ -95,6 +96,29 @@ def demo_controls(
     return threshold, replay_until
 
 
+# Restricts the visible events by region and observation dates without losing saved results.
+def event_filters(anomalies: list[AnomalyRecord]) -> list[AnomalyRecord]:
+    regions = sorted({item.region for item in anomalies})
+    dates = [item.observation_date for item in anomalies]
+    selected = st.sidebar.multiselect("Regions to include", regions, default=regions, key="region_filter")
+    period = st.sidebar.date_input("Observation period", value=(min(dates), max(dates)), key="period_filter")
+    if len(period) != 2:
+        st.info("Select the end date to finish the observation period.")
+        return []
+    return [item for item in anomalies if item.region in selected and period[0] <= item.observation_date <= period[1]]
+
+
+# Resets filters and chooses the latest detected event for a repeatable demonstration.
+def prepare_guided_demo(anomalies: list[AnomalyRecord]) -> None:
+    candidates = [item for item in anomalies if item.status == "detected"] or anomalies
+    selected = max(candidates, key=lambda item: item.observation_date)
+    st.session_state["region_filter"] = sorted({item.region for item in anomalies})
+    st.session_state["period_filter"] = (min(item.observation_date for item in anomalies), max(item.observation_date for item in anomalies))
+    st.session_state[REGION_KEY] = selected.region
+    st.session_state[ANOMALY_KEY] = selected
+    st.session_state["guided_pending"] = selected.anomaly_id
+
+
 # Picks a region, then an anomaly in that region, from the sidebar.
 def select_anomaly(anomalies: list[AnomalyRecord]) -> AnomalyRecord:
     st.sidebar.header("Demo controls")
@@ -142,9 +166,28 @@ def run_investigation(anomaly: AnomalyRecord) -> None:
     stored_results()[anomaly.anomaly_id] = result
 
 
+# Reads explicit classifications and offers an illustrative color selector only in sample mode.
+def severity_controls(anomalies: list[AnomalyRecord], is_sample: bool) -> dict[str, str]:
+    raw = st.session_state.get("severity_by_anomaly", {})
+    try:
+        levels = components._severity_mapping(anomalies, raw)
+    except ValueError as error:
+        st.sidebar.error(str(error))
+        levels = {}
+    if is_sample:
+        with st.sidebar.expander("Alert color preview (sample data)"):
+            choice = st.selectbox("Illustrative severity", ["Use supplied classification", "red", "orange", "yellow", "green"], key="sample_severity")
+            st.caption("Visual demonstration only. These colors are not real risk assessments.")
+        if choice != "Use supplied classification":
+            levels = {item.anomaly_id: choice for item in anomalies}
+            st.warning("Severity colors are a sample preview, not a real risk assessment.")
+    return levels
+
+
 # Renders the clicked event: what happened, the agents' latest update, and their sources.
-def render_event_panel(selected: AnomalyRecord, result: InvestigationResult | None) -> None:
+def render_event_panel(selected: AnomalyRecord, result: InvestigationResult | None, severity: str | None = None) -> None:
     st.subheader(f"{selected.region}: {selected.variable.replace('_', ' ')}")
+    components.severity_alert(severity)
     st.write(
         f"{selected.value:+g} {selected.unit} on {selected.observation_date} "
         f"(baseline {selected.baseline_period}) · status: {selected.status}"
@@ -162,12 +205,14 @@ def render_event_panel(selected: AnomalyRecord, result: InvestigationResult | No
 
 # Renders the Overview tab: monitoring status and anomaly cards (the globe is beside it).
 def render_overview(
-    anomalies: list[AnomalyRecord], anomalies_are_sample: bool, selected: AnomalyRecord
+    anomalies: list[AnomalyRecord], anomalies_are_sample: bool, selected: AnomalyRecord,
+    severities: dict[str, str] | None = None,
 ) -> None:
-    components.status_strip(anomalies, anomalies_are_sample)
+    components.status_strip(anomalies, anomalies_are_sample, severity_by_anomaly=severities)
     st.subheader("Detected signals")
+    st.plotly_chart(anomaly_comparison_chart(anomalies, selected.anomaly_id), width="stretch", alt="Supplied anomalies compared only within matching variables and units")
     for anomaly in anomalies:
-        components.anomaly_card(anomaly, anomaly.anomaly_id == selected.anomaly_id)
+        components.anomaly_card(anomaly, anomaly.anomaly_id == selected.anomaly_id, severity=(severities or {}).get(anomaly.anomaly_id))
 
 
 # Renders the Climate Explorer tab: the observation chart and the anomaly detail view.
@@ -177,6 +222,7 @@ def render_explorer(
     series_is_sample: bool,
     threshold: float,
     replay_until: date | None,
+    severity: str | None = None,
 ) -> None:
     if series is None:
         st.info("Observations are unavailable for this region right now.")
@@ -195,7 +241,7 @@ def render_explorer(
                 f"Replay is at {replay_until}. Move the slider to {selected.observation_date} "
                 "to reach the detected anomaly."
             )
-    components.anomaly_detail(selected)
+    components.anomaly_detail(selected, severity=severity)
 
 
 # Renders the original observation next to the agents' conclusion.
@@ -227,21 +273,23 @@ def render_investigation(selected: AnomalyRecord, result: InvestigationResult | 
 
 
 # Renders the Regional Briefing tab once an assessment exists for the selected anomaly.
-def render_briefing(selected: AnomalyRecord, result: InvestigationResult | None) -> None:
+def render_briefing(selected: AnomalyRecord, result: InvestigationResult | None, severity: str | None = None) -> None:
+    with st.expander("World map · all continents"):
+        st.plotly_chart(region_map(selected.region), width="stretch", alt="World map with the selected monitoring region highlighted")
     if result is None or result.assessment is None:
         st.info("Run an investigation to generate the regional briefing.")
         return
     if result.is_sample:
         show_sample_banner("Assessment")
-    components.briefing(result.assessment, selected)
+    components.briefing(result.assessment, selected, severity=severity)
 
 
 # Builds the full EarthWatch page.
 def main() -> None:
-    st.set_page_config(page_title="EarthWatch", page_icon="🌊", layout="wide")
+    st.set_page_config(page_title="EarthWatch", page_icon="🌍", layout="wide")
     apply_theme()
     st.title("EarthWatch")
-    st.caption("Global climate intelligence · first monitored: eastern tropical Pacific and northern Peru")
+    st.caption("Worldwide climate events and anomaly awareness · explore evidence, uncertainty, and recommended actions")
     try:
         anomalies, anomalies_are_sample = cached_anomalies()
     except TranslatorError as error:
@@ -253,30 +301,46 @@ def main() -> None:
         st.info("No anomalies detected.")
         return
 
-    selected = select_anomaly(anomalies)
-    series, series_is_sample = load_series(selected.region)
+    st.sidebar.button("Run guided demo", key="guided_demo", on_click=prepare_guided_demo, args=(anomalies,))
+    visible = event_filters(anomalies)
+    if not visible:
+        st.info("No events match these filters. Adjust the region or observation period, or run the guided demo.")
+        return
+    if st.session_state.get(REGION_KEY) not in {item.region for item in visible}:
+        st.session_state.pop(REGION_KEY, None)
+        st.session_state.pop(ANOMALY_KEY, None)
+    selected = select_anomaly(visible)
+    if "sea_surface_temperature" in selected.variable or selected.variable == "sst":
+        series, series_is_sample = load_series(selected.region)
+    else:
+        series, series_is_sample = None, False
+    severities = severity_controls(anomalies, anomalies_are_sample)
+    severity = severities.get(selected.anomaly_id)
     threshold, replay_until = demo_controls(anomalies, series)
 
     globe_column, dashboard_column = st.columns([3, 2], gap="medium")
     with globe_column:
-        render_globe(anomalies, selected.region, select_from_globe)
+        render_globe(visible, selected.region, select_from_globe,
+                     region_locations=st.session_state.get("region_locations"),
+                     severity_by_anomaly={item.anomaly_id: severities[item.anomaly_id] for item in visible if item.anomaly_id in severities})
         st.caption(f"Selected signal: {anomaly_label(selected)}")
     with dashboard_column:
-        if st.button("Run Investigation", type="primary", width="stretch"):
+        pending = st.session_state.pop("guided_pending", None)
+        if st.button("Run Investigation", type="primary", width="stretch", key="run_investigation") or pending == selected.anomaly_id:
             run_investigation(selected)
         result = stored_results().get(selected.anomaly_id)
         if result is not None and result.error:
             st.error(result.error)
-        render_event_panel(selected, result)
+        render_event_panel(selected, result, severity)
         overview, explorer, investigation, briefing = st.tabs(TAB_NAMES)
         with overview:
-            render_overview(anomalies, anomalies_are_sample, selected)
+            render_overview(visible, anomalies_are_sample, selected, {item.anomaly_id: severities[item.anomaly_id] for item in visible if item.anomaly_id in severities})
         with explorer:
-            render_explorer(selected, series, series_is_sample, threshold, replay_until)
+            render_explorer(selected, series, series_is_sample, threshold, replay_until, severity)
         with investigation:
             render_investigation(selected, result)
         with briefing:
-            render_briefing(selected, result)
+            render_briefing(selected, result, severity)
 
 
 main()
