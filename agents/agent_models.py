@@ -9,10 +9,11 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from schemas.assessment import ConfidenceLevel, EvidenceType
+from schemas.assessment import AlertLevel, ConfidenceLevel, EvidenceType
 
 Verdict = Literal["accept", "revise", "reject"]
 Severity = Literal["minor", "major"]
+AlternativeStatus = Literal["supported", "unsupported", "untested"]
 
 
 # =============================================================================
@@ -32,10 +33,24 @@ class AgentEvidence(BaseModel):
 
 
 # =============================================================================
+# AlternativeExplanation
+# =============================================================================
+
+# A competing explanation the Investigator tested (or honestly left untested).
+class AlternativeExplanation(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    explanation: str = Field(min_length=1)
+    evidence_for: str = ""
+    evidence_against: str = ""
+    status: AlternativeStatus
+
+
+# =============================================================================
 # InvestigationReport
 # =============================================================================
 
-# Climate Investigator output: what the evidence does and does not support.
+# Investigator Bot output: what the evidence does and does not support.
 class InvestigationReport(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -43,19 +58,37 @@ class InvestigationReport(BaseModel):
     evidence: list[AgentEvidence] = Field(default_factory=list)
     supporting_findings: list[str] = Field(default_factory=list)
     contradictory_findings: list[str] = Field(default_factory=list)
+    alternative_explanations: list[AlternativeExplanation] = Field(
+        default_factory=list
+    )
     open_questions: list[str] = Field(default_factory=list)
     proposed_confidence: ConfidenceLevel
+
+
+# =============================================================================
+# Exposure
+# =============================================================================
+
+# One group, sector or asset that could plausibly be affected, with its basis.
+class Exposure(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    who_or_what: str = Field(min_length=1)
+    possible_effect: str = Field(min_length=1)
+    basis: str = Field(min_length=1)
+    uncertainty: str = ""
 
 
 # =============================================================================
 # ImpactReport
 # =============================================================================
 
-# Regional Impact Analyst output: qualified implications for northern Peru.
+# Impact Bot output: who or what could be affected, stated as possibilities.
 class ImpactReport(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     regional_implications: list[str] = Field(default_factory=list)
+    exposures: list[Exposure] = Field(default_factory=list)
     evidence: list[AgentEvidence] = Field(default_factory=list)
     limitations: list[str] = Field(default_factory=list)
     recommended_next_steps: list[str] = Field(default_factory=list)
@@ -87,6 +120,35 @@ class VerificationReport(BaseModel):
     issues: list[SkepticIssue] = Field(default_factory=list)
     confidence_cap: ConfidenceLevel
     limitations: list[str] = Field(default_factory=list)
+
+
+# =============================================================================
+# ContingencyDraft
+# =============================================================================
+
+# One conditional response proposed by the Action Bot.
+class ContingencyDraft(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    trigger: str = Field(min_length=1)
+    action: str = Field(min_length=1)
+    rationale: str = Field(min_length=1)
+
+
+# =============================================================================
+# ActionReport
+# =============================================================================
+
+# Action Bot output: alert, short report and contingency plan.
+class ActionReport(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    alert_level: AlertLevel
+    alert_headline: str = Field(min_length=1)
+    alert_message: str = Field(min_length=1)
+    report: str = Field(min_length=1)
+    contingency_plan: list[ContingencyDraft] = Field(default_factory=list)
+    monitoring_triggers: list[str] = Field(default_factory=list)
 
 
 # =============================================================================

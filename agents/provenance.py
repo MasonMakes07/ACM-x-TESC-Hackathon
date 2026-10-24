@@ -6,10 +6,16 @@ Owner: Person 2 (Grok Agent Intelligence).
 import re
 from collections.abc import Iterable
 
-from agents.agent_models import AgentEvidence, SkepticIssue
+from agents.agent_models import (
+    AgentEvidence,
+    AlternativeExplanation,
+    Exposure,
+    SkepticIssue,
+)
+from agents.context import PERU_LOCATIONS
 from agents.ledger import EvidenceLedger
 from schemas.anomaly import AnomalyRecord
-from schemas.assessment import ConfidenceLevel, EvidenceItem
+from schemas.assessment import AlertLevel, ConfidenceLevel, EvidenceItem
 
 CONFIDENCE_ORDER: tuple[ConfidenceLevel, ...] = (
     "inconclusive",
@@ -17,17 +23,62 @@ CONFIDENCE_ORDER: tuple[ConfidenceLevel, ...] = (
     "moderate",
     "high",
 )
+ALERT_ORDER: tuple[AlertLevel, ...] = ("informational", "monitor", "elevated")
 OVERREACH_PATTERN = re.compile(
     r"\b(caused by|will cause|will flood|will result in|will lead to|"
     r"guarantee[sd]?|certainly|definitely|undoubtedly|proves?|inevitabl[ey])\b",
     re.IGNORECASE,
 )
 UNVERIFIED_NOTE = "Source was not retrieved during this investigation; unverified."
+WRONG_LOCATION_NOTE = (
+    "The claim concerns {claim_places} but the cited source covers "
+    "{source_places}; each location's figures must cite that location's source."
+)
 
 
 # Returns the lowest of the given confidence levels.
 def lowest_confidence(*levels: ConfidenceLevel) -> ConfidenceLevel:
     return min(levels, key=CONFIDENCE_ORDER.index)
+
+
+# Formats an alternative explanation as one display line (also used for checks).
+def format_alternative(alternative: AlternativeExplanation) -> str:
+    parts = [
+        f"Alternative explanation [{alternative.status}]: {alternative.explanation}"
+    ]
+    if alternative.evidence_for:
+        parts.append(f"For: {alternative.evidence_for}")
+    if alternative.evidence_against:
+        parts.append(f"Against: {alternative.evidence_against}")
+    return " ".join(parts)
+
+
+# Formats an exposure as one display line (also used for checks).
+def format_exposure(exposure: Exposure) -> str:
+    detail = f"basis: {exposure.basis}"
+    if exposure.uncertainty:
+        detail += f"; uncertainty: {exposure.uncertainty}"
+    return f"{exposure.who_or_what}: {exposure.possible_effect} ({detail})"
+
+
+# Returns the highest alert level the evidence justifies (the Action Bot's ceiling).
+def max_alert_level(
+    anomaly_status: str, confidence: ConfidenceLevel, signal_reproduced: bool
+) -> tuple[AlertLevel, str]:
+    if anomaly_status != "detected":
+        return "informational", f"the record's status is '{anomaly_status}'"
+    if not signal_reproduced:
+        return "informational", "the Sentinel Bot could not reproduce the signal"
+    if confidence == "inconclusive":
+        return "informational", "the assessment is inconclusive"
+    if confidence == "low":
+        return "monitor", "confidence is low"
+    return "elevated", f"the signal is detected with {confidence} confidence"
+
+
+# Returns the lower of two alert levels.
+def lowest_alert(first: AlertLevel, second: AlertLevel) -> AlertLevel:
+    return min(first, second, key=ALERT_ORDER.index)
 
 
 # Joins an optional existing note with a new one.
@@ -37,6 +88,7 @@ def _append_note(existing: str | None, note: str) -> str:
 
 # Builds the measured evidence item for the anomaly straight from the record.
 def observation_evidence(anomaly: AnomalyRecord) -> EvidenceItem:
+    from agents.context import is_live_weather
     return EvidenceItem(
         claim=(
             f"{anomaly.variable} in {anomaly.region} was {anomaly.value} "
@@ -45,8 +97,15 @@ def observation_evidence(anomaly: AnomalyRecord) -> EvidenceItem:
         ),
         source=anomaly.source,
         source_date=anomaly.observation_date,
-        evidence_type="measured",
+        evidence_type="reported" if is_live_weather(anomaly) else "measured",
+        limitations='Current weather-model estimate, not a station observation.' if is_live_weather(anomaly) else None,
     )
+
+
+# Returns the monitored place names (Piura, Tumbes) that appear in a text.
+def _places_in(text: str) -> set[str]:
+    lowered = text.lower()
+    return {place for place in PERU_LOCATIONS if place.lower() in lowered}
 
 
 # Checks agent evidence against the ledger; unverifiable items become uncertain.
@@ -56,11 +115,14 @@ def verify_evidence(
     verified: list[EvidenceItem] = []
     seen_keys: set[tuple[str, str]] = set()
     for item in items:
-        key = (item.claim.strip().lower(), item.source.strip().lower())
+        ledger_source = ledger.find(item.source, item.url)
+        # Compare the resolved source name so differently worded citations of the
+        # same source and claim collapse into one evidence item.
+        resolved_source = ledger_source.name if ledger_source else item.source
+        key = (item.claim.strip().lower(), resolved_source.strip().lower())
         if key in seen_keys:
             continue
         seen_keys.add(key)
-        ledger_source = ledger.find(item.source, item.url)
         if ledger_source is None:
             verified.append(
                 EvidenceItem(
@@ -74,7 +136,18 @@ def verify_evidence(
             )
             continue
         evidence_type = item.evidence_type
-        if evidence_type == "measured" and ledger_source.kind != "measurement":
+        limitations = item.limitations
+        unsupported_places = _places_in(item.claim) - _places_in(ledger_source.name)
+        if _places_in(ledger_source.name) and unsupported_places:
+            evidence_type = "uncertain"
+            limitations = _append_note(
+                limitations,
+                WRONG_LOCATION_NOTE.format(
+                    claim_places=", ".join(sorted(_places_in(item.claim))),
+                    source_places=", ".join(sorted(_places_in(ledger_source.name))),
+                ),
+            )
+        elif evidence_type == "measured" and ledger_source.kind != "measurement":
             evidence_type = "reported"
         verified.append(
             EvidenceItem(
@@ -82,7 +155,7 @@ def verify_evidence(
                 source=ledger_source.name,
                 source_date=item.source_date,
                 evidence_type=evidence_type,
-                limitations=item.limitations,
+                limitations=limitations,
                 url=ledger_source.url,
             )
         )

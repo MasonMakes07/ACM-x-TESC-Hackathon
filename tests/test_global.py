@@ -152,14 +152,24 @@ def test_global_app_default_has_world_country_picker():
     assert not app.exception
     assert app.radio(key='monitoring_view').value == 'Worldwide locations'
     assert len(app.selectbox[0].options) >= 250
-    assert button(app, 'Load climate data').disabled
+    assert button(app, "Load today's weather").disabled
+
+
+# Finds the radio that offers a given option, so tests do not depend on widget order.
+def radio_with(app, option):
+    return next(item for item in app.radio if option in item.options)
+
+
+def historical_app():
+    app = worldwide_app()
+    return radio_with(app, 'Climate history').set_value('Climate history').run()
 
 
 def test_coordinate_ui_load_investigate_and_selection_change(global_data, monkeypatch):
     def stub(*a): raise NotImplementedError
     monkeypatch.setattr(translator.workflow, 'run_investigation', stub)
-    app = worldwide_app()
-    app.radio[0].set_value('Coordinates').run()
+    app = historical_app()
+    radio_with(app, 'Coordinates').set_value('Coordinates').run()
     app.text_input[0].set_value('Tokyo').run()
     app.number_input[0].set_value(35.7)
     app.number_input[1].set_value(139.7)
@@ -180,7 +190,7 @@ def test_search_ui_country_and_place_flow(global_data, monkeypatch):
         captured.append((query, code))
         return [Location('Nairobi',-1.3,36.8,'Kenya','KE')]
     monkeypatch.setattr(translator,'search_world_locations',search)
-    app = worldwide_app()
+    app = historical_app()
     kenya = next(item for item in countries() if item['code'] == 'KE')
     app.selectbox[0].set_value(kenya)
     app.text_input[0].set_value('Nairobi').run()

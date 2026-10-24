@@ -36,7 +36,7 @@ OFFICIAL_SOURCES = {
     "noaa_oni_table": {
         "name": "NOAA CPC Oceanic Nino Index (ONI) table",
         "url": (
-            "https://origin.cpc.ncep.noaa.gov/products/analysis_monitoring/"
+            "https://www.cpc.ncep.noaa.gov/products/analysis_monitoring/"
             "ensostuff/ONI_v5.php"
         ),
     },
