@@ -23,6 +23,7 @@ from analysis import anomaly_detection
 from data import climate_sources
 from schemas.anomaly import SERIES_COLUMNS, AnomalyRecord
 from schemas.assessment import Assessment, ProgressEvent
+from agents.agent_errors import AgentOutputError, GrokError
 from schemas.errors import TranslatorError
 
 logger = logging.getLogger(__name__)
@@ -103,6 +104,17 @@ def load_observation_series(region: str) -> tuple[pd.DataFrame, bool]:
     return tidy_series.reset_index(drop=True), is_mock
 
 
+# Explains why an investigation failed in words the user can act on (never includes secrets).
+def _failure_reason(error: Exception, fallback: str) -> str:
+    if isinstance(error, GrokError):
+        return f"{fallback} The Grok service said: {str(error)[:300]}"
+    if isinstance(error, AgentOutputError):
+        return f"{fallback} An agent returned output that could not be validated."
+    if isinstance(error, RuntimeError) and str(error).startswith("Missing "):
+        return f"{fallback} {error}"
+    return fallback
+
+
 # Runs an investigation for one anomaly; returns the assessment and a mock flag.
 def investigate_anomaly(
     anomaly_id: str, on_progress: Callable[[ProgressEvent], None]
@@ -130,7 +142,9 @@ def investigate_anomaly(
         return _load_sample_assessment(anomaly_id), True
     except Exception as error:
         logger.exception("run_investigation(%s) failed", anomaly_id)
-        raise TranslatorError("The investigation failed to complete.") from error
+        raise TranslatorError(
+            _failure_reason(error, "The investigation failed to complete.")
+        ) from error
     assessment = _validate(Assessment, raw_assessment, "Assessment")
     if assessment.anomaly_id != anomaly_id:
         raise TranslatorError("Assessment returned for the wrong anomaly.")
@@ -175,7 +189,7 @@ def investigate_location(climate, anomaly_id, on_progress):
             recommended_next_steps=[f'Check the national meteorological service and local hazard authorities for {climate.location.country or climate.location.label}.'])
         return assessment, True
     except Exception as error:
-        raise TranslatorError('The location investigation failed.') from error
+        raise TranslatorError(_failure_reason(error, 'The location investigation failed.')) from error
     assessment = _validate(Assessment, result, 'Location assessment')
     if assessment.anomaly_id != anomaly_id:
         raise TranslatorError('Assessment returned for the wrong location observation.')

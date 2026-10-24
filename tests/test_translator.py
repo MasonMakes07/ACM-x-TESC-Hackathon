@@ -167,3 +167,27 @@ def test_load_series_accepts_worldwide_regions(stubbed_backend, region):
 def test_unbuilt_global_source_does_not_relabel_pacific_sample():
     with pytest.raises(TranslatorError, match='No observations have been supplied'):
         translator.load_observation_series('Indian Ocean')
+
+
+# Checks a Grok service failure tells the user why, without hiding it behind a generic message.
+def test_investigation_failure_explains_grok_refusal(stubbed_backend):
+    from agents.agent_errors import GrokError
+
+    def refuse(*args, **kwargs):
+        raise GrokError("Grok API returned HTTP 403: team has no credits")
+
+    stubbed_backend.setattr(translator.workflow, "run_investigation", refuse)
+    anomaly_id = translator.load_anomalies()[0][0].anomaly_id
+    with pytest.raises(TranslatorError, match="no credits"):
+        translator.investigate_anomaly(anomaly_id, lambda event: None)
+
+
+# Checks a missing API key is reported by name instead of as a generic failure.
+def test_investigation_failure_reports_missing_key(stubbed_backend):
+    def missing(*args, **kwargs):
+        raise RuntimeError("Missing XAI_API_KEY. Copy .env.example to .env and set it.")
+
+    stubbed_backend.setattr(translator.workflow, "run_investigation", missing)
+    anomaly_id = translator.load_anomalies()[0][0].anomaly_id
+    with pytest.raises(TranslatorError, match="XAI_API_KEY"):
+        translator.investigate_anomaly(anomaly_id, lambda event: None)
