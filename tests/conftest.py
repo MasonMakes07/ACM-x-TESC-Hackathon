@@ -21,3 +21,17 @@ def stubbed_backend(monkeypatch):
     monkeypatch.setattr(translator.climate_sources, "get_sst_series", _not_implemented)
     monkeypatch.setattr(translator.workflow, "run_investigation", _not_implemented)
     return monkeypatch
+
+
+@pytest.fixture(autouse=True)
+def isolate_global_hazard_monitor(monkeypatch):
+    """App smoke tests never launch background NOAA or paid Grok requests."""
+    from dashboard import global_hazards
+    from agents.hazard_monitor import utcnow
+    class IdleMonitor:
+        def snapshot(self):
+            return dict(feed=None, reviews={}, logs=[], error=None, review_errors={},
+                        last_checked=None, last_attempt=utcnow(), running=False)
+        def request_refresh(self, **kwargs):
+            return False
+    monkeypatch.setattr(global_hazards, 'get_hazard_monitor', lambda: IdleMonitor())

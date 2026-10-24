@@ -17,6 +17,7 @@ from dashboard.explanation import render_explanation
 from dashboard.globe import render_globe
 from dashboard.sources import sources_panel
 from dashboard.theme import apply_theme
+from dashboard.tutorial_overlay import tutorial_button, render_tutorial
 from schemas.anomaly import AnomalyRecord
 from schemas.assessment import Assessment, ProgressEvent
 from schemas.errors import TranslatorError
@@ -28,6 +29,9 @@ VIEW_KEY = "monitoring_view"
 GLOBE_VIEW = "Pacific ocean indices"
 WORLD_VIEW = "Worldwide locations"
 AUTO_KEY = "auto_explain"
+WATCH_VIEW = "Global risk watchlist"
+ANOMALY_VIEW = "Weather anomalies"
+HAZARD_VIEW = "Global hazard events"
 REGION_KEY = "region_select"
 ANOMALY_KEY = "anomaly_select"
 
@@ -126,7 +130,7 @@ def prepare_guided_demo(anomalies: list[AnomalyRecord]) -> None:
 
 # Picks a region, then an anomaly in that region, from the sidebar.
 def select_anomaly(anomalies: list[AnomalyRecord]) -> AnomalyRecord:
-    st.sidebar.header("Demo controls")
+    st.sidebar.header("Explore signals")
     regions = sorted({anomaly.region for anomaly in anomalies})
     region = st.sidebar.selectbox("Region", regions, key=REGION_KEY)
     in_region = [anomaly for anomaly in anomalies if anomaly.region == region]
@@ -313,8 +317,25 @@ def render_assessment(assessment: Assessment, assessment_is_sample: bool) -> Non
 def render_page() -> None:
     st.set_page_config(page_title="EarthWatch", page_icon="🌍", layout="wide")
     apply_theme()
+    st.sidebar.markdown('**EARTHWATCH** · Climate intelligence')
+    view_switch()
+    tutorial_button()
+    st.sidebar.caption("A field guide to a changing planet.")
     st.title("EarthWatch")
-    if st.session_state.get(VIEW_KEY, GLOBE_VIEW) == WORLD_VIEW:
+    render_tutorial(st.session_state.get(VIEW_KEY, HAZARD_VIEW))
+    if st.session_state.get(VIEW_KEY, HAZARD_VIEW) == HAZARD_VIEW:
+        from dashboard.global_hazards import render_global_hazards
+        render_global_hazards()
+        return
+    if st.session_state.get(VIEW_KEY, ANOMALY_VIEW) == ANOMALY_VIEW:
+        from dashboard.weather_anomalies import render_weather_anomalies
+        render_weather_anomalies()
+        return
+    if st.session_state.get(VIEW_KEY, WATCH_VIEW) == WATCH_VIEW:
+        from dashboard.watchlist import render_watchlist
+        render_watchlist()
+        return
+    if st.session_state.get(VIEW_KEY, WATCH_VIEW) == WORLD_VIEW:
         from dashboard.global_explorer import render_global_explorer
         render_global_explorer(render_assessment)
         return
@@ -378,20 +399,17 @@ def render_page() -> None:
             render_briefing(selected, result, severity)
 
 
-# Draws the small sidebar switch between the globe dashboard and the worldwide location search.
+# Navigation keeps seasonal outlooks separate from current weather and observations.
 def view_switch() -> None:
     st.sidebar.radio(
-        "Monitoring view", [GLOBE_VIEW, WORLD_VIEW], key=VIEW_KEY,
-        help="Pacific ocean indices is the globe dashboard. Worldwide locations searches any place.",
+        "Monitoring view", [HAZARD_VIEW, ANOMALY_VIEW, WATCH_VIEW, WORLD_VIEW, GLOBE_VIEW], key=VIEW_KEY,
+        help="Global risk watchlist: seasonal outlooks. Worldwide locations: current weather and climate history. Pacific ocean indices: specialist observations.",
     )
 
 
-# Builds the full EarthWatch page; the view switch is always drawn last in the sidebar.
+# Builds the full EarthWatch page.
 def main() -> None:
-    try:
-        render_page()
-    finally:
-        view_switch()
+    render_page()
 
 
 main()

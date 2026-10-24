@@ -1,8 +1,21 @@
-# Owner: Person 3 / Codex B. Keep Streamlit's native accessible controls.
+# EarthWatch · warm paper, forest, and clay.
 [theme]
-base = "dark"
-primaryColor = "#70E1BB"
-backgroundColor = "#0B1420"
-secondaryBackgroundColor = "#121F30"
-textColor = "#EDF3FA"
+base = "light"
+primaryColor = "#426346"
+linkColor = "#3D6041"
+backgroundColor = "#F7F5ED"
+secondaryBackgroundColor = "#ECEDE1"
+textColor = "#29392D"
 font = "sans serif"
+headingFont = "serif"
+borderColor = "#D7DCCB"
+baseRadius = "0.75rem"
+buttonRadius = "0.5rem"
+showSidebarBorder = true
+headingFontSizes = ["2.75rem", "1.9rem", "1.35rem"]
+chartCategoricalColors = ["#426346", "#B66B4A", "#938344", "#668B87", "#756D82", "#8C9675"]
+
+[theme.sidebar]
+backgroundColor = "#E8ECDF"
+secondaryBackgroundColor = "#F4F5ED"
+textColor = "#29392D"

@@ -11,16 +11,17 @@ import plotly.graph_objects as go
 
 from schemas.anomaly import AnomalyRecord
 
-LINE_COLOR = "#5CC8FF"
-ANOMALY_COLOR = "#B8C8D9"
-THRESHOLD_COLOR = "#FFD180"
+LINE_COLOR = "#426346"
+ANOMALY_COLOR = "#B66B4A"
+THRESHOLD_COLOR = "#938344"
 EMPTY_MESSAGE = "No observations in this period"
 
 
-# Applies the shared dark, transparent styling used by every EarthWatch figure.
+# Applies the shared earthy, transparent styling used by every EarthWatch figure.
 def apply_dark_layout(figure: go.Figure) -> go.Figure:
     figure.update_layout(
-        template="plotly_dark",
+        template="plotly_white",
+        font={"color": "#29392D"},
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
         margin={"l": 40, "r": 20, "t": 50, "b": 40},
@@ -132,7 +133,7 @@ def anomaly_comparison_chart(anomalies: list[AnomalyRecord], selected_id: str | 
     for row, ((variable, unit), records) in enumerate(groups.items(), 1):
         figure.add_trace(go.Bar(
             x=[f"{item.region} · {item.observation_date}" for item in records], y=[item.value for item in records],
-            name=variable.replace("_", " "), marker_color=["#8DDCF0" if item.anomaly_id == selected_id else "#94A3B8" for item in records],
+            name=variable.replace("_", " "), marker_color=["#426346" if item.anomaly_id == selected_id else "#8C9675" for item in records],
             customdata=[[str(item.observation_date), escape(item.source)] for item in records],
             hovertemplate=f"%{{x}}<br>%{{y:g}} {escape(unit)}<br>Source: %{{customdata[1]}}<extra></extra>",
         ), row=row, col=1)

@@ -1,4 +1,4 @@
-"""Readable dark workstation theme. Owner: Person 3 / Codex B."""
+"""Warm, earthy field journal theme. Owner: Person 3 / Codex B."""
 
 import streamlit as st
 
@@ -8,21 +8,23 @@ def apply_theme() -> None:
     st.markdown(
         """
         <style>
-        :root { color-scheme: dark; }
-        .stApp { background: #0b1420; color: #edf3fa; }
+        :root { color-scheme: light; }
+        .stApp { background: linear-gradient(135deg, #f7f5ed, #f2f3e9); color: #29392d; }
         .stMainBlockContainer { max-width: 1440px; padding-top: 2rem; }
-        [data-testid="stSidebar"] { background: #121f30; }
-        [data-testid="stCaptionContainer"] { color: #b8c8d9; }
+        [data-testid="stSidebar"] { background: #e8ecdf; }
+        [data-testid="stCaptionContainer"] { color: #65705f; }
         [data-testid="stMetricValue"] { font-variant-numeric: tabular-nums;
             font-size: clamp(1.15rem, 2.3vw, 1.9rem); overflow-wrap: anywhere; }
         [data-testid="stVerticalBlockBorderWrapper"] { border-radius: 12px; }
-        h1, h2, h3 { letter-spacing: -.015em; }
+        h1, h2, h3 { letter-spacing: -.035em; }
+        [data-testid="stMetric"] { background: #fffdf7; border: 1px solid #d7dccb; border-radius: 16px; padding: 16px 20px; }
+        [data-testid="stMetricLabel"] { color: #65705f; }
         p, li { line-height: 1.65; }
         a { text-underline-offset: .2em; }
         button, [role="tab"], summary { min-height: 44px; }
         button:focus-visible, a:focus-visible, summary:focus-visible,
         input:focus-visible, [role="tab"]:focus-visible {
-            outline: 3px solid #70e1bb !important; outline-offset: 3px;
+            outline: 3px solid #426346 !important; outline-offset: 3px;
         }
         .ew-confidence { display: inline-block; border: 1px solid currentColor;
             border-radius: 6px; padding: .35rem .7rem; font-weight: 600; }

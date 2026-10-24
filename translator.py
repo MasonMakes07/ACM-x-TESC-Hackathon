@@ -151,6 +151,36 @@ def investigate_anomaly(
     return assessment, False
 
 # Worldwide monitoring uses location objects rather than the Pacific index allow-list.
+def seasonal_agent_ready() -> bool:
+    """Expose configuration readiness without exposing credential values."""
+    import os
+    return all(os.getenv(name, '').strip() for name in ('XAI_API_KEY', 'XAI_MODEL'))
+
+
+def scan_seasonal_area(location, months, on_progress):
+    """Retrieve real seasonal anomalies and obtain an evidence-checked Grok review."""
+    from data.seasonal import load_seasonal
+    from agents.seasonal_watch import assess_seasonal
+    from schemas.watchlist import WatchResult
+    try:
+        on_progress(ProgressEvent(timestamp=datetime.now(timezone.utc), agent='Seasonal data',
+                                  message=f'Loading ECMWF SEAS5 monthly anomalies for {location.label}.'))
+        snapshot = load_seasonal(location, months)
+        result = _validate(WatchResult, assess_seasonal(snapshot, on_progress), 'Seasonal outlook')
+        if (result.location_key != location.key or result.location_label != location.label
+                or result.latitude != location.latitude or result.longitude != location.longitude
+                or result.window_start != snapshot.window_start or result.window_end != snapshot.window_end
+                or result.signals != snapshot.signals or result.source_url != snapshot.source_url
+                or result.retrieved_at != snapshot.retrieved_at or result.model != snapshot.model):
+            raise TranslatorError('The seasonal review did not match the requested area and retrieved evidence.')
+        return result
+    except TranslatorError:
+        raise
+    except Exception as error:
+        logger.error('Seasonal watch failed: %s', type(error).__name__)
+        raise TranslatorError(_failure_reason(error, 'Seasonal data or the Grok review was unavailable. Retry this area.')) from error
+
+
 def search_world_locations(query, country_code=None):
     from data.locations import search_locations
     try:

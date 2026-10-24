@@ -19,7 +19,7 @@ PERU_LOCATIONS: dict[str, tuple[float, float]] = {
     "Chiclayo": (-6.77, -79.84),
     "Trujillo": (-8.11, -79.03),
 }
-SELECTED_COLOR = "#8DDCF0"
+SELECTED_COLOR = "#426346"
 DIM_COLOR = "#5C6B80"
 LOCATION_COLOR = "#94A3B8"
 
@@ -60,9 +60,9 @@ def region_map(selected_region: str | None = None) -> go.Figure:
     figure.update_geos(
         scope="world", projection_type="natural earth", center={"lat": 0, "lon": 0},
         lataxis_range=[-90, 90], lonaxis_range=[-180, 180],
-        showland=True, landcolor="#263746", showocean=True, oceancolor="#0C2434",
-        showcountries=True, countrycolor="#526779", showcoastlines=True,
-        coastlinecolor="#7C92A3", showlakes=False, showframe=True, framecolor="#526779",
+        showland=True, landcolor="#DEE4D1", showocean=True, oceancolor="#E6EFEC",
+        showcountries=True, countrycolor="#A1AB96", showcoastlines=True,
+        coastlinecolor="#7B8B72", showlakes=False, showframe=True, framecolor="#A1AB96",
         bgcolor="rgba(0,0,0,0)",
     )
     figure.update_layout(

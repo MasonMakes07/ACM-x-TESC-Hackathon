@@ -20,7 +20,7 @@ GLOBE_HEIGHT = 700
 STATUS_COLORS = {
     "detected": "#ff6b6b",
     "monitoring": "#ffd180",
-    "inconclusive": "#cbd5e1",
+    "inconclusive": "#65705f",
 }
 LOCATION_COLOR = "#94a3b8"
 QUIET_COLOR = "#5c6b80"
@@ -42,16 +42,16 @@ GLOBE_HTML = """
 """
 
 GLOBE_CSS = """
-.stage { position: relative; width: 100%; height: __HEIGHT__px; background: #050b13;
+.stage { position: relative; width: 100%; height: __HEIGHT__px; background: #e6eadf;
   border-radius: 12px; overflow: hidden; font-family: sans-serif; }
 #globeViz { width: 100%; height: 100%; }
-#legend { position: absolute; left: 14px; bottom: 14px; background: rgba(10,16,28,.9);
-  color: #e6edf3; padding: 10px 12px; border: 1px solid #304252; border-radius: 8px;
+#legend { position: absolute; left: 14px; bottom: 14px; background: rgba(255,253,247,.95);
+  color: #29392d; padding: 10px 12px; border: 1px solid #c2ccb5; border-radius: 8px;
   font-size: 11px; line-height: 1.6; pointer-events: none; max-width: calc(100% - 28px); }
 #legend i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
-#legend .hint { color: #b8c8d9; }
+#legend .hint { color: #65705f; }
 #fallback { position: absolute; inset: 0; display: none; align-items: center;
-  justify-content: center; color: #cbd5e1; text-align: center; padding: 24px; }
+  justify-content: center; color: #65705f; text-align: center; padding: 24px; }
 @media(max-width:640px){.stage{height:540px}#legend{font-size:10px;padding:8px}.hint{max-width:280px}}
 """.replace("__HEIGHT__", str(GLOBE_HEIGHT))
 
@@ -81,7 +81,7 @@ function createGlobe(Globe, container, setTriggerValue) {
     .width(container.clientWidth).height(container.clientHeight)
     .globeImageUrl("https://threejs.org/examples/textures/planets/earth_atmos_2048.jpg")
     .bumpImageUrl(TEXTURES + "/earth-topology.png")
-    .backgroundColor("#050b13")
+    .backgroundColor("#e6eadf")
     .showAtmosphere(true).atmosphereColor("#72b5ef").atmosphereAltitude(0.12)
     .pointLat("lat").pointLng("lng").pointColor("color").pointAltitude(0.012)
     .pointRadius("radius").pointLabel("tooltip").onPointClick(pick)
@@ -89,6 +89,9 @@ function createGlobe(Globe, container, setTriggerValue) {
     .labelSize(1.1).labelDotRadius(0).labelAltitude(0.025).onLabelClick(pick)
     .pathPoints("coords").pathPointLat((p) => p[0]).pathPointLng((p) => p[1])
     .pathColor("color").pathStroke(1.6).pathLabel("name")
+    .polygonGeoJsonGeometry("geometry").polygonCapColor("fill").polygonStrokeColor("color")
+    .polygonSideColor(() => "rgba(0,0,0,0)").polygonAltitude(d => d.selected ? 0.012 : 0.006)
+    .polygonLabel("tooltip").onPolygonClick(pick).polygonsTransitionDuration(0)
     .ringLat("lat").ringLng("lng").ringColor((d) => () => d.color)
     .ringMaxRadius("maxRadius").ringPropagationSpeed(1).ringRepeatPeriod(2000);
   const state = { globe, view: null, timer: null, rotate: true, pulses: true, rings: [], interacting: false,
@@ -120,6 +123,7 @@ export default function (component) {
     if (!state) { state = createGlobe(Globe, container, setTriggerValue); instances.set(parentElement, state); }
     const { globe } = state;
     state.rotate = data.rotate; state.pulses = data.pulses; state.rings = data.rings;
+    globe.polygonsData(data.polygons || []);
     globe.pointsData(data.points).labelsData(data.points.filter((p) => p.region)).pathsData(data.outlines);
     state.sync(); fallback.style.display = "none";
     if (state.view !== data.view_key) {

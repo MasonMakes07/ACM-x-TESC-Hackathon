@@ -4,6 +4,44 @@ Worldwide climate intelligence: choose any country or territory, search for a
 place, or enter coordinates anywhere on Earth. Explore local temperature and
 precipitation anomalies with traceable sources and a historical baseline.
 
+## Global seasonal risk watchlist
+
+The default **Global risk watchlist** monitors potential floods, droughts, heat
+waves, wildfire conditions, and heavy rainfall over the next **1–3 full calendar
+months**. Eight representative points across the Americas, Europe, Africa, Asia,
+and Australia are provided as watch candidates, not pre-existing hazard predictions.
+Add named coordinates anywhere on Earth, or export/import your watched areas.
+Watchlists and scan results remain in the current Streamlit session.
+
+Choose areas and a window, then click **Scan selected areas with Grok**. Each area
+uses retrieved **ECMWF SEAS5 monthly ensemble-mean anomalies via Open-Meteo** for
+temperature, precipitation, surface soil moisture, and runoff. The Seasonal Scout,
+Impact Analyst, and Seasonal Skeptic bots draft and review an outlook using the
+same evidence. Each of the three stages calls the configured Grok model. Existing
+`XAI_API_KEY`, `XAI_MODEL`, and xAI credits are required. No paid calls run on page load.
+
+The watchlist supports hazard/level filters, a world map, per-area explanations,
+monitoring triggers, confidence, limitations, source values, agent activity, and
+JSON report downloads. Reviews persist across reruns. Failed refreshes preserve
+old reports as explicitly noncurrent; unavailable source data or invalid agent
+output never becomes a sample prediction. Results need refreshing after six hours
+or a change to the selected outlook window. A scan fetch can reuse source data
+cached for up to six hours; the source retrieval timestamp is displayed.
+The world overview uses bundled public-domain Natural Earth boundaries, so it
+does not depend on external basemap tiles. Select a marker to open its area outlook.
+
+These forecasts describe seasonal area conditions relative to the **model
+climatology**. They are not bias-corrected and do not establish exact event dates,
+calibrated disaster probabilities, drought onset, flood extent, or wildfire ignition.
+Code checks evidence references and necessary directional indicators, not forecast
+skill: this is not a validated or calibrated hazard-prediction model. Climate change
+is relevant background context; individual event attribution is not performed.
+Use official warnings and shorter-range local forecasts for operational decisions.
+
+Sources: [Open-Meteo Seasonal Forecast API](https://open-meteo.com/en/docs/seasonal-forecast-api),
+[ECMWF seasonal forecast guidance](https://confluence.ecmwf.int/pages/viewpage.action?pageId=181111118),
+and [IPCC AR6 climate extremes assessment](https://www.ipcc.ch/report/ar6/wg1/chapter/chapter-11/).
+
 ## Setup
 
 ```powershell
@@ -19,7 +57,7 @@ in `.env.example`; the climate data and statistical assessments need no API key.
 
 ## Worldwide monitoring
 
-The default **Worldwide locations** view supports:
+The **Worldwide locations** view supports:
 
 - **Live weather**: today's current temperature, feels-like temperature, humidity,
   wind, precipitation, and local hourly weather for the selected point. Click
@@ -84,3 +122,35 @@ must use the selected record's region, coordinates, date and source, rather than
 assuming Peru or interpreting Pacific indices as local SST everywhere.
 
 Full original plan: [plan.md](plan.md), with its worldwide scope update first.
+
+## Current weather anomalies (default view)
+
+Scan watched locations, then click a globe marker to open current temperature,
+wind, or completed-hour rain against the 1991–2020 ERA5 distribution. Add cities
+through search or enter coordinates. Comparisons match the local hour and a
+15-day seasonal window, require 20 years/200 valid samples, and expose source
+links and missing-history states. Fahrenheit and Celsius are supported.
+The San Diego 100°F/67°F example is illustrative, never a seeded live reading.
+
+**Explain causes & safety actions** asks the configured Grok model to interpret
+that exact snapshot, state testable possible causes, and recommend sourced
+precautions. It requires xAI credentials and credits. Scanning weather does not
+call Grok. Snapshots expire from the current globe after ten minutes from
+retrieval or 90 minutes from the conditions timestamp; refresh manually.
+The watchlist is selected-point coverage, not a continuous global alert service.
+
+
+### NOAA global hazard globe
+
+The default **Global hazard events** view loads NOAA CPC's published week-2/3
+KML polygons for cyclone formation, above/below-median rainfall, and above/below-normal
+temperatures. Click a footprint or choose an event to inspect its probability,
+valid dates, source links, and Grok explanation. Colors identify forecast type.
+
+Grok Hazard Scout and Grok Evidence Reviewer use `XAI_API_KEY` and `XAI_MODEL`
+from `.env`. Reviews run in background batches and persist in `.cache/earthwatch/`.
+The open globe checks for source updates every 30 minutes. New source evidence
+invalidates previous reviews; unchanged editions reuse them. **Update events with
+Grok** checks immediately and retries failed reviews. Updates run while the app is
+open, not as a system-wide scheduled service. NOAA coverage is primarily tropical;
+these forecasts are not current observations, confirmed disasters, or local warnings.

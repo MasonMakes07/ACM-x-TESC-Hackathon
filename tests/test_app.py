@@ -159,12 +159,12 @@ def test_non_sst_event_does_not_call_sst_source(stubbed_backend):
 
 
 # The real default view includes the integrated globe and both motion controls.
-def test_default_view_is_the_globe_dashboard_with_globe_controls():
+def test_default_view_is_global_hazards():
     app = AppTest.from_file(APP_PATH, default_timeout=30).run()
     assert not app.exception
-    assert app.radio(key="monitoring_view").value == 'Pacific ocean indices'
-    assert any('Worldwide climate events' in item.value for item in app.caption)
-    assert len(app.toggle) == 3
+    assert app.radio(key="monitoring_view").value == 'Global hazard events'
+    assert any('A world of signals' in item.value for item in app.header)
+    assert any(item.label == 'Update events with Grok' for item in app.button)
 
 
 # Opening an event explains it automatically, without pressing Run Investigation.
