@@ -1,0 +1,10 @@
+{
+  "scenario": "2017 coastal Pacific warming",
+  "baseline": "1982-2011 rainfall; NOAA 1991-2020 SST",
+  "files": [
+    "Nino_1_2.csv",
+    "Nino_3.4.csv",
+    "Piura.csv",
+    "Tumbes.csv"
+  ]
+}

@@ -1,3 +1,24 @@
+WORLDWIDE SCOPE UPDATE - 2026-10-24
+The product now supports locations worldwide. The original Peru-focused proposal
+below is retained as historical project context and a replay case study. Its
+geographic restrictions are superseded by the following requirements:
+- Default to worldwide monitoring with all countries/territories searchable.
+- Let users select a place within any country, or enter arbitrary coordinates.
+- Retrieve local ERA5 air temperature and precipitation with local timezones,
+  source/coordinate provenance, and a location-specific historical baseline.
+- Show location maps, charts, monthly anomalies, and downloadable observations.
+- Pass the selected location's measurements into investigations. Never substitute
+  Peru sample claims for another location. Clearly label statistical fallback
+  while the Grok workflow remains unimplemented.
+- Preserve Pacific NOAA indices and the 2017 Peru replay as optional specialist
+  data, without implying they measure local ocean conditions everywhere.
+- Country selection is a place-search filter; results represent the selected
+  point/grid cell rather than a national average.
+Implementation and teammate APIs: README.md and data/GLOBAL.md. Existing entry
+signatures and shared schemas remain compatible.
+
+ORIGINAL PROPOSAL (geographic scope superseded above)
+
 READ FIRST: The repository skeleton already exists. Before writing code, read section 18 (Working in parallel without breaking each other) and README.md.
 
 1. Define exactly what EarthWatch will do
