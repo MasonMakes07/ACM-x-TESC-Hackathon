@@ -19,7 +19,7 @@ from agents.grok_client import GrokClient
 from agents.ledger import EvidenceLedger
 from agents.runner import run_agent
 from agents.sentinel import monitor
-from agents.toolbox import AgentToolbox
+from agents.toolbox import OFFICIAL_SOURCES, AgentToolbox
 from agents.workflow import run_investigation
 from schemas.anomaly import AnomalyRecord
 
@@ -93,9 +93,10 @@ def check_data_tools() -> int:
         "get_rainfall_history",
         {"location": "Piura", "start_date": "2017-01-01", "end_date": "2017-03-31"},
     )
-    print_tool_result(
-        pacific_box, "fetch_official_source", {"source_id": "noaa_enso_discussion"}
-    )
+    for source_id in OFFICIAL_SOURCES:
+        print_tool_result(
+            pacific_box, "fetch_official_source", {"source_id": source_id}
+        )
     print("\n== Worldwide record (ERA5 at coordinates) ==")
     print_tool_result(
         local_box,

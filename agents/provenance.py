@@ -12,6 +12,7 @@ from agents.agent_models import (
     Exposure,
     SkepticIssue,
 )
+from agents.context import PERU_LOCATIONS
 from agents.ledger import EvidenceLedger
 from schemas.anomaly import AnomalyRecord
 from schemas.assessment import AlertLevel, ConfidenceLevel, EvidenceItem
@@ -29,6 +30,10 @@ OVERREACH_PATTERN = re.compile(
     re.IGNORECASE,
 )
 UNVERIFIED_NOTE = "Source was not retrieved during this investigation; unverified."
+WRONG_LOCATION_NOTE = (
+    "The claim concerns {claim_places} but the cited source covers "
+    "{source_places}; each location's figures must cite that location's source."
+)
 
 
 # Returns the lowest of the given confidence levels.
@@ -97,6 +102,12 @@ def observation_evidence(anomaly: AnomalyRecord) -> EvidenceItem:
     )
 
 
+# Returns the monitored place names (Piura, Tumbes) that appear in a text.
+def _places_in(text: str) -> set[str]:
+    lowered = text.lower()
+    return {place for place in PERU_LOCATIONS if place.lower() in lowered}
+
+
 # Checks agent evidence against the ledger; unverifiable items become uncertain.
 def verify_evidence(
     items: Iterable[AgentEvidence], ledger: EvidenceLedger
@@ -104,11 +115,14 @@ def verify_evidence(
     verified: list[EvidenceItem] = []
     seen_keys: set[tuple[str, str]] = set()
     for item in items:
-        key = (item.claim.strip().lower(), item.source.strip().lower())
+        ledger_source = ledger.find(item.source, item.url)
+        # Compare the resolved source name so differently worded citations of the
+        # same source and claim collapse into one evidence item.
+        resolved_source = ledger_source.name if ledger_source else item.source
+        key = (item.claim.strip().lower(), resolved_source.strip().lower())
         if key in seen_keys:
             continue
         seen_keys.add(key)
-        ledger_source = ledger.find(item.source, item.url)
         if ledger_source is None:
             verified.append(
                 EvidenceItem(
@@ -122,7 +136,18 @@ def verify_evidence(
             )
             continue
         evidence_type = item.evidence_type
-        if evidence_type == "measured" and ledger_source.kind != "measurement":
+        limitations = item.limitations
+        unsupported_places = _places_in(item.claim) - _places_in(ledger_source.name)
+        if _places_in(ledger_source.name) and unsupported_places:
+            evidence_type = "uncertain"
+            limitations = _append_note(
+                limitations,
+                WRONG_LOCATION_NOTE.format(
+                    claim_places=", ".join(sorted(_places_in(item.claim))),
+                    source_places=", ".join(sorted(_places_in(ledger_source.name))),
+                ),
+            )
+        elif evidence_type == "measured" and ledger_source.kind != "measurement":
             evidence_type = "reported"
         verified.append(
             EvidenceItem(
@@ -130,7 +155,7 @@ def verify_evidence(
                 source=ledger_source.name,
                 source_date=item.source_date,
                 evidence_type=evidence_type,
-                limitations=item.limitations,
+                limitations=limitations,
                 url=ledger_source.url,
             )
         )
