@@ -165,3 +165,174 @@ def test_status_uses_latest_regional_observation(records: tuple[list[AnomalyReco
     assert not app.exception
     assert app.metric[0].value == "Monitoring"
     assert "Observed 2023-07-01" in _visible_text(app)
+
+
+# Exercises the browser component through Streamlit without loading any remote services.
+def _render_globe(anomalies: "list[AnomalyRecord]", assessment: "Assessment") -> None:
+    from dashboard.components import climate_globe
+
+    climate_globe(anomalies, [assessment], is_sample=True)
+
+
+# Checks the globe exposes supplied records, motion controls, and keyboard region access.
+@pytest.mark.parametrize("legacy", [False, True])
+def test_globe_component_renders(
+    records: tuple[list[AnomalyRecord], Assessment], monkeypatch: pytest.MonkeyPatch, legacy: bool,
+) -> None:
+    import streamlit as st
+
+    if legacy:
+        monkeypatch.delattr(st, "iframe", raising=False)
+    anomalies, assessment = records
+    app = AppTest.from_function(_render_globe, args=(anomalies, assessment)).run()
+    assert not app.exception
+    if legacy:
+        assert not app.get("iframe")
+        assert "requires a Streamlit version with st.iframe" in _visible_text(app)
+        assert app.metric
+        return
+    document = app.get("iframe")[0].proto.srcdoc
+    assert 'id="region"' in document
+    assert 'id="rotate"' in document
+    assert 'prefers-reduced-motion' in document
+    assert '"isSample": true' in document
+    assert assessment.summary in document
+    assert 'earth_atmos_2048.jpg' in document
+
+
+# A hostile claim must stay JSON data instead of terminating its script container.
+def test_globe_payload_escapes_script_content(records: tuple[list[AnomalyRecord], Assessment]) -> None:
+    from dashboard.components import _globe_document
+
+    anomalies, assessment = records
+    hostile = '</script><script>alert("injected")</script>'
+    report = assessment.model_copy(update={"summary": hostile})
+    document = _globe_document(anomalies, [report], False)
+    payload = document.split('<script id="earthwatch-data" type="application/json">', 1)[1].split('</script>', 1)[0]
+    decoded = json.loads(payload)
+    assert decoded['assessments'][0]['summary'] == hostile
+    assert '<script>' not in payload
+    assert decoded['anomalies'][0]['anomaly_id'] == anomalies[0].anomaly_id
+    assert decoded['isSample'] is False
+
+
+# Global navigation remains available even when no connected feed supplies observations.
+def test_globe_covers_world_without_inventing_observations() -> None:
+    from dashboard.components import _globe_payload
+
+    payload = json.loads(_globe_payload([], [], False))
+    names = {item['name'] for item in payload['regions']}
+    assert {'Africa', 'Europe', 'Asia', 'North America', 'South America', 'Oceania',
+            'Antarctica', 'Arctic', 'Pacific Ocean', 'Atlantic Ocean', 'Indian Ocean'} <= names
+    assert not payload['anomalies']
+    assert not payload['assessments']
+
+
+# Arbitrary regional feeds can locate markers anywhere without editing shared schemas.
+def test_globe_accepts_worldwide_feed_locations(records: tuple[list[AnomalyRecord], Assessment]) -> None:
+    from dashboard.components import _globe_payload
+
+    anomalies, assessment = records
+    region = 'Tokyo'
+    anomaly = anomalies[0].model_copy(update={'region': region})
+    payload = json.loads(_globe_payload([anomaly], [assessment], False, {region: (35.68, 139.69)}))
+    location = next(item for item in payload['regions'] if item['name'] == region)
+    assert (location['latitude'], location['longitude']) == (35.68, 139.69)
+    assert payload['anomalies'][0]['region'] == region
+
+
+# Missing locations stay unlocated instead of being silently assigned to Peru.
+def test_globe_keeps_unknown_region_unmapped(records: tuple[list[AnomalyRecord], Assessment]) -> None:
+    from dashboard.components import _globe_payload
+
+    anomalies, _ = records
+    payload = json.loads(_globe_payload([anomalies[0].model_copy(update={'region': 'Unknown basin'})], [], False))
+    location = next(item for item in payload['regions'] if item['name'] == 'Unknown basin')
+    assert location['latitude'] is None and location['longitude'] is None
+
+
+# Bad feed coordinates cannot create off-Earth or invalid WebGL positions.
+@pytest.mark.parametrize('coordinates', [(91, 0), (0, 181), (float('nan'), 0), (0, float('inf')), (True, 0), ('35', 0), (1,)])
+def test_globe_rejects_invalid_coordinates(coordinates: tuple[object, ...]) -> None:
+    from dashboard.components import _globe_payload
+
+    with pytest.raises(ValueError):
+        _globe_payload([], [], False, {'New region': coordinates})
+
+
+# Ensures all requested severity colors are distinct and unknown severity stays neutral.
+@pytest.mark.parametrize('level', ['red', 'orange', 'yellow', 'green', 'unknown', None, 'invalid'])
+def test_severity_color(level: str | None) -> None:
+    from dashboard.components import severity_color
+
+    assert severity_color(level).startswith('#')
+    assert len({severity_color(key) for key in ('red', 'orange', 'yellow', 'green')}) == 4
+    assert severity_color(None) == severity_color('invalid') == severity_color('unknown')
+    assert severity_color('green') != severity_color('unknown')
+
+
+# Renders every badge through Streamlit without requiring an agent call.
+def _render_severity(level: str | None) -> None:
+    from dashboard.components import severity_alert
+
+    severity_alert(level)
+
+
+# Each severity retains its plain-language meaning without relying solely on color.
+@pytest.mark.parametrize('level,label', [
+    ('red', 'Critical danger'), ('orange', 'High concern'),
+    ('yellow', 'Moderate concern'), ('green', 'Beneficial event'),
+    (None, 'Severity not assessed'),
+])
+def test_severity_badge_renders(level: str | None, label: str) -> None:
+    app = AppTest.from_function(_render_severity, args=(level,)).run()
+    assert not app.exception
+    assert label in _visible_text(app)
+    assert 'prefers-reduced-motion' in _visible_text(app)
+
+
+# Severity must remain an explicit input, never a guess based on values or confidence.
+def test_globe_preserves_explicit_severity(records: tuple[list[AnomalyRecord], Assessment]) -> None:
+    from dashboard.components import _globe_payload
+
+    anomalies, assessment = records
+    anomaly_id = anomalies[0].anomaly_id
+    for level in ('red', 'orange', 'yellow', 'green'):
+        payload = json.loads(_globe_payload(anomalies, [assessment], False, severity_by_anomaly={anomaly_id: level}))
+        assert payload['severityByAnomaly'] == {anomaly_id: level}
+    payload = json.loads(_globe_payload(anomalies, [assessment], False))
+    assert payload['severityByAnomaly'] == {}
+    assert payload['severityStyles']['unknown']['color'] != payload['severityStyles']['green']['color']
+
+
+# Invalid classifications and wrong event IDs cannot silently color an unrelated event.
+@pytest.mark.parametrize('mapping', [[], {'missing_event': 'red'}, {'sample_nino12_001': 'bad'}, {'sample_nino12_001': None}])
+def test_globe_rejects_invalid_severity(records: tuple[list[AnomalyRecord], Assessment], mapping: object) -> None:
+    from dashboard.components import _globe_payload
+
+    anomalies, assessment = records
+    with pytest.raises(ValueError):
+        _globe_payload(anomalies, [assessment], False, severity_by_anomaly=mapping)
+
+
+# Exercises severity changes across dated observations without calling any backend.
+def _render_status_severity(anomaly: 'AnomalyRecord', days: int) -> None:
+    from datetime import timedelta
+
+    from dashboard.components import status_strip
+
+    recent = anomaly.model_copy(update={
+        'anomaly_id': 'sample_recent', 'observation_date': anomaly.observation_date + timedelta(days=days),
+    })
+    status_strip([anomaly, recent], True, severity_by_anomaly={anomaly.anomaly_id: 'red', recent.anomaly_id: 'green'})
+
+
+# An old critical classification cannot override a newer beneficial observation.
+@pytest.mark.parametrize('days,label', [(0, 'Critical danger'), (30, 'Beneficial event')])
+def test_status_severity_uses_current_observations(
+    records: tuple[list[AnomalyRecord], Assessment], days: int, label: str,
+) -> None:
+    anomalies, _ = records
+    app = AppTest.from_function(_render_status_severity, args=(anomalies[0], days)).run()
+    assert not app.exception
+    assert label in _visible_text(app)
