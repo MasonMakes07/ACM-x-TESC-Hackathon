@@ -13,6 +13,7 @@ import translator
 from dashboard import components
 from dashboard.charts import observation_chart
 from dashboard.globe import render_globe
+from dashboard.sources import sources_panel
 from dashboard.theme import apply_theme
 from schemas.anomaly import AnomalyRecord
 from schemas.assessment import Assessment, ProgressEvent
@@ -21,6 +22,8 @@ from schemas.errors import TranslatorError
 TAB_NAMES = ("Overview", "Climate Explorer", "Investigation", "Regional Briefing")
 DEFAULT_THRESHOLD = 1.0
 CACHE_SECONDS = 600
+REGION_KEY = "region_select"
+ANOMALY_KEY = "anomaly_select"
 
 
 # One finished (or failed) investigation, kept per anomaly so tabs and reruns keep it.
@@ -96,9 +99,23 @@ def demo_controls(
 def select_anomaly(anomalies: list[AnomalyRecord]) -> AnomalyRecord:
     st.sidebar.header("Demo controls")
     regions = sorted({anomaly.region for anomaly in anomalies})
-    region = st.sidebar.selectbox("Region", regions)
+    region = st.sidebar.selectbox("Region", regions, key=REGION_KEY)
     in_region = [anomaly for anomaly in anomalies if anomaly.region == region]
-    return st.sidebar.selectbox("Anomaly", in_region, format_func=anomaly_label)
+    return st.sidebar.selectbox(
+        "Anomaly", in_region, format_func=anomaly_label, key=ANOMALY_KEY
+    )
+
+
+# Selects the anomaly whose globe marker was clicked (runs before the script body).
+def select_from_globe(anomaly_id: str) -> None:
+    try:
+        anomalies, _ = cached_anomalies()
+    except TranslatorError:
+        return
+    match = next((item for item in anomalies if item.anomaly_id == anomaly_id), None)
+    if match is not None:
+        st.session_state[REGION_KEY] = match.region
+        st.session_state[ANOMALY_KEY] = match
 
 
 # Runs the investigation, streaming real progress events into a status box and storing them.
@@ -123,6 +140,24 @@ def run_investigation(anomaly: AnomalyRecord) -> None:
         else:
             status_box.update(label="Assessment complete", state="complete", expanded=False)
     stored_results()[anomaly.anomaly_id] = result
+
+
+# Renders the clicked event: what happened, the agents' latest update, and their sources.
+def render_event_panel(selected: AnomalyRecord, result: InvestigationResult | None) -> None:
+    st.subheader(f"{selected.region}: {selected.variable.replace('_', ' ')}")
+    st.write(
+        f"{selected.value:+g} {selected.unit} on {selected.observation_date} "
+        f"(baseline {selected.baseline_period}) · status: {selected.status}"
+    )
+    assessment = result.assessment if result else None
+    if assessment is not None:
+        st.write(assessment.summary)
+        st.caption(f"Confidence: {assessment.confidence}")
+    if result and result.events:
+        last = result.events[-1]
+        st.caption(f"Last agent update {last.timestamp:%Y-%m-%d %H:%M:%S} · {last.agent}")
+    with st.expander("Sources", expanded=True):
+        sources_panel(selected, assessment, bool(result and result.is_sample))
 
 
 # Renders the Overview tab: monitoring status and anomaly cards (the globe is beside it).
@@ -224,7 +259,7 @@ def main() -> None:
 
     globe_column, dashboard_column = st.columns([3, 2], gap="medium")
     with globe_column:
-        render_globe(anomalies, selected.region)
+        render_globe(anomalies, selected.region, select_from_globe)
         st.caption(f"Selected signal: {anomaly_label(selected)}")
     with dashboard_column:
         if st.button("Run Investigation", type="primary", width="stretch"):
@@ -232,6 +267,7 @@ def main() -> None:
         result = stored_results().get(selected.anomaly_id)
         if result is not None and result.error:
             st.error(result.error)
+        render_event_panel(selected, result)
         overview, explorer, investigation, briefing = st.tabs(TAB_NAMES)
         with overview:
             render_overview(anomalies, anomalies_are_sample, selected)
