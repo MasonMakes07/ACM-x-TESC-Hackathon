@@ -13,6 +13,7 @@ import translator
 from dashboard import components
 from dashboard.charts import anomaly_comparison_chart, observation_chart
 from dashboard.maps import region_map
+from dashboard.explanation import render_explanation
 from dashboard.globe import render_globe
 from dashboard.sources import sources_panel
 from dashboard.theme import apply_theme
@@ -26,6 +27,7 @@ CACHE_SECONDS = 600
 VIEW_KEY = "monitoring_view"
 GLOBE_VIEW = "Pacific ocean indices"
 WORLD_VIEW = "Worldwide locations"
+AUTO_KEY = "auto_explain"
 REGION_KEY = "region_select"
 ANOMALY_KEY = "anomaly_select"
 
@@ -196,8 +198,8 @@ def render_event_panel(selected: AnomalyRecord, result: InvestigationResult | No
         f"(baseline {selected.baseline_period}) · status: {selected.status}"
     )
     assessment = result.assessment if result else None
+    render_explanation(assessment, bool(result and result.is_sample))
     if assessment is not None:
-        st.write(assessment.summary)
         st.caption(f"Confidence: {assessment.confidence}")
     if result and result.events:
         last = result.events[-1]
@@ -344,6 +346,10 @@ def render_page() -> None:
     severities = severity_controls(anomalies, anomalies_are_sample)
     severity = severities.get(selected.anomaly_id)
     threshold, replay_until = demo_controls(anomalies, series)
+    st.sidebar.toggle(
+        "Explain events automatically", value=True, key=AUTO_KEY,
+        help="When on, opening an event asks the Grok agents why it is happening. Turn off to save API credits.",
+    )
 
     globe_column, dashboard_column = st.columns([3, 2], gap="medium")
     with globe_column:
@@ -354,6 +360,8 @@ def render_page() -> None:
     with dashboard_column:
         pending = st.session_state.pop("guided_pending", None)
         if st.button("Run Investigation", type="primary", width="stretch", key="run_investigation") or pending == selected.anomaly_id:
+            run_investigation(selected)
+        elif st.session_state.get(AUTO_KEY, True) and selected.anomaly_id not in stored_results():
             run_investigation(selected)
         result = stored_results().get(selected.anomaly_id)
         if result is not None and result.error:

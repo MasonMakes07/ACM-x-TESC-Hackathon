@@ -17,6 +17,14 @@ def pacific_app():
     return app.radio[0].set_value('Pacific ocean indices').run()
 
 
+# Opens the globe dashboard with automatic explanations off, for tests of the manual button flow.
+def manual_app():
+    app = AppTest.from_file(APP_PATH, default_timeout=30)
+    app.session_state["auto_explain"] = False
+    app.run()
+    return app.radio[0].set_value('Pacific ocean indices').run()
+
+
 def test_app_renders_and_investigates_in_sample_mode():
     app = pacific_app()
     assert not app.exception
@@ -60,7 +68,7 @@ def test_app_has_four_tabs():
 
 # Checks the timeline and briefing fill in after an investigation and survive a rerun.
 def test_investigation_results_persist_across_reruns():
-    app = pacific_app()
+    app = manual_app()
     assert "No investigation run yet" in app.tabs[2].info[0].value
     app.button(key="run_investigation").click().run()
     app.run()
@@ -84,7 +92,7 @@ def test_demo_controls_change_without_errors():
 
 # Checks results are kept per anomaly: a different anomaly starts with an empty timeline.
 def test_results_are_kept_per_anomaly():
-    app = pacific_app()
+    app = manual_app()
     app.button(key="run_investigation").click().run()
     app.sidebar.selectbox[0].set_value("Nino 3.4").run()
     assert "No investigation run yet" in app.tabs[2].info[0].value
@@ -104,7 +112,7 @@ def test_globe_selection_opens_that_event():
 
 # Checks the event panel lists the agents' sources after an investigation, labelled as sample.
 def test_event_panel_shows_sources_after_investigation():
-    app = pacific_app()
+    app = manual_app()
     assert any("No agent sources yet" in item.value for item in app.info)
     app.button(key="run_investigation").click().run()
     assert not app.exception
@@ -156,4 +164,55 @@ def test_default_view_is_the_globe_dashboard_with_globe_controls():
     assert not app.exception
     assert app.radio(key="monitoring_view").value == 'Pacific ocean indices'
     assert any('Worldwide climate events' in item.value for item in app.caption)
-    assert len(app.toggle) == 2
+    assert len(app.toggle) == 3
+
+
+# Opening an event explains it automatically, without pressing Run Investigation.
+def test_event_is_explained_automatically_when_opened():
+    app = pacific_app()
+    assert not app.exception
+    assert any("Why is this happening?" in item.value for item in app.markdown)
+    assert any("Sample mode" in item.label for item in app.tabs[2].expander)
+    assert any("SAMPLE explanation" in item.value for item in app.warning)
+
+
+# Turning the switch off means nothing runs until the button is pressed, and the page says so.
+def test_auto_explain_off_waits_for_the_button():
+    app = manual_app()
+    assert not app.exception
+    assert any("have not explained this event yet" in item.value for item in app.info)
+    app.button(key="run_investigation").click().run()
+    assert any("SAMPLE explanation" in item.value for item in app.warning)
+
+
+# Each newly opened event is explained once; switching back reuses the saved explanation.
+def test_auto_explain_runs_once_per_event(monkeypatch):
+    calls = []
+    original = translator.investigate_anomaly
+
+    def counting(anomaly_id, on_progress):
+        calls.append(anomaly_id)
+        return original(anomaly_id, on_progress)
+
+    monkeypatch.setattr(translator, "investigate_anomaly", counting)
+    app = pacific_app()
+    app.sidebar.selectbox[0].set_value("Nino 3.4").run()
+    app.sidebar.selectbox[0].set_value("Nino 1+2").run()
+    app.run()
+    assert len(calls) == 2 and len(set(calls)) == 2
+
+
+# A failed automatic explanation shows the reason and is not retried on every rerun.
+def test_auto_explain_failure_is_shown_and_not_retried(stubbed_backend):
+    calls = []
+
+    def refuse(*args, **kwargs):
+        calls.append(1)
+        raise RuntimeError("Missing XAI_API_KEY. Copy .env.example to .env and set it.")
+
+    stubbed_backend.setattr(translator.workflow, "run_investigation", refuse)
+    app = pacific_app()
+    app.run()
+    app.run()
+    assert any("XAI_API_KEY" in item.value for item in app.error)
+    assert len(calls) == 1
