@@ -38,20 +38,22 @@ def rainfall_metrics(series, baseline_start='1982-01-01', baseline_end='2011-12-
     return daily.reset_index(), monthly
 
 
-def detect_rainfall(series, *, percentile_threshold=95, min_years=20):
+def detect_rainfall(series, *, percentile_threshold=95, min_years=20, baseline_start='1982-01-01', baseline_end='2011-12-31'):
     """Return latest rain signal using same-month seven-day empirical percentile."""
     from schemas.anomaly import AnomalyRecord
     if not 0 < percentile_threshold <= 100:
         raise ValueError('Percentile threshold must be in (0, 100]')
-    daily, _ = rainfall_metrics(series, min_years=min_years)
+    daily, _ = rainfall_metrics(series, baseline_start, baseline_end, min_years=min_years)
     row = daily.iloc[-1]
     if pd.isna(row['rolling_7day_mm']) or pd.isna(row['seasonal_percentile']):
         raise ValueError('Insufficient rainfall observations or baseline coverage')
     location = str(series['region'].iloc[-1])
+    import hashlib
+    location_key = hashlib.sha256((location + str(series.get('latitude', '')) + str(series.get('longitude', ''))).encode()).hexdigest()[:16]
     return AnomalyRecord(
-        anomaly_id=f'{location.lower()}_rain_{row["date"]:%Y%m%d}',
+        anomaly_id=f'{location_key}_rain_{row["date"]:%Y%m%d}',
         variable='Seven-day precipitation total', region=location,
         observation_date=row['date'].date(), value=float(row['rolling_7day_mm']),
-        unit='mm/7 days', baseline_period='1982-2011', source=str(series['source'].iloc[-1]),
+        unit='mm/7 days', baseline_period=f'{pd.Timestamp(baseline_start).year}-{pd.Timestamp(baseline_end).year}', source=str(series['source'].iloc[-1]),
         detection_method=f'Same-calendar-month endpoint empirical percentile={row["seasonal_percentile"]:.2f}; threshold={percentile_threshold:g}; ERA5 reanalysis, not flood prediction',
         status='detected' if row['seasonal_percentile'] >= percentile_threshold else 'monitoring')

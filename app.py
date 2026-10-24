@@ -90,7 +90,12 @@ def run_investigation(anomaly: AnomalyRecord) -> None:
 def main() -> None:
     st.set_page_config(page_title="EarthWatch", layout="wide")
     st.title("EarthWatch")
-    st.caption("Pacific climate intelligence")
+    mode = st.radio("Monitoring view", ["Worldwide locations", "Pacific ocean indices"], horizontal=True)
+    if mode == "Worldwide locations":
+        from dashboard.global_explorer import render_global_explorer
+        render_global_explorer(render_assessment)
+        return
+    st.caption("Pacific ocean indices")
     try:
         anomalies, anomalies_are_sample = translator.load_anomalies()
     except TranslatorError as error:

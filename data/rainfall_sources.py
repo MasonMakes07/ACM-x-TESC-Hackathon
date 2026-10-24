@@ -10,6 +10,13 @@ LOCATIONS = {'Piura': (-5.1945, -80.6328), 'Tumbes': (-3.5669, -80.4515)}
 
 
 def get_rainfall_history(location, start_date, end_date):
+    from data.locations import Location
+    if isinstance(location, Location):
+        from data.weather_sources import get_weather_history
+        frame = get_weather_history(location, start_date, end_date)
+        frame = frame.drop(columns=['temperature']).rename(columns={'precipitation':'value'})
+        frame['unit'] = 'mm/day'
+        return frame
     if location not in LOCATIONS:
         raise ValueError(f'Unsupported rainfall location: {location}')
     start, end = date.fromisoformat(str(start_date)), date.fromisoformat(str(end_date))
