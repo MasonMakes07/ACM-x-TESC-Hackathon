@@ -222,39 +222,81 @@ def briefing(assessment: Assessment, anomaly: AnomalyRecord) -> None:
     st.caption("EarthWatch investigates unusual conditions. An ocean-temperature anomaly alone cannot establish a specific flood forecast.")
 
 
-# Serializes validated backend records safely for an isolated browser component.
+# Builds worldwide navigation and accepts precise locations from any backend feed.
+def _globe_regions(
+    anomalies: list[AnomalyRecord], region_locations: dict[str, tuple[float, float]] | None,
+) -> list[dict[str, object]]:
+    from math import isfinite
+
+    centers: dict[str, tuple[float, float]] = {
+        "North America": (40, -105), "South America": (-18, -60),
+        "Europe": (50, 15), "Africa": (2, 22), "Asia": (35, 100),
+        "Oceania": (-25, 135), "Antarctica": (-80, 0),
+        "Arctic": (80, 0), "Pacific Ocean": (0, -150),
+        "Atlantic Ocean": (5, -35), "Indian Ocean": (-15, 75),
+    }
+    known_indices = {"Nino 1+2": (-5, -85), "Nino 3.4": (0, -145)}
+    for name, coordinates in (region_locations or {}).items():
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("Region names must be nonempty strings.")
+        if not isinstance(coordinates, (tuple, list)) or len(coordinates) != 2:
+            raise ValueError("Region locations must contain latitude and longitude.")
+        lat, lon = coordinates
+        if any(isinstance(value, bool) or not isinstance(value, (int, float))
+               or not isfinite(value) for value in coordinates):
+            raise ValueError("Region coordinates must be finite numbers.")
+        if not -90 <= lat <= 90 or not -180 <= lon <= 180:
+            raise ValueError("Region coordinates are outside Earth's latitude or longitude range.")
+        centers[name] = (lat, lon)
+    for anomaly in anomalies:
+        if anomaly.region not in centers and anomaly.region in known_indices:
+            centers[anomaly.region] = known_indices[anomaly.region]
+    names = dict.fromkeys([*centers, *(item.region for item in anomalies)])
+    return [
+        {"name": name, "latitude": centers[name][0] if name in centers else None,
+         "longitude": centers[name][1] if name in centers else None}
+        for name in names
+    ]
+
+
+# Serializes worldwide backend records safely for an isolated browser component.
 def _globe_payload(
     anomalies: list[AnomalyRecord], assessments: list[Assessment], is_sample: bool,
+    region_locations: dict[str, tuple[float, float]] | None = None,
 ) -> str:
     import json
 
     payload = {
         "anomalies": [item.model_dump(mode="json") for item in anomalies],
         "assessments": [item.model_dump(mode="json") for item in assessments],
+        "regions": _globe_regions(anomalies, region_locations),
         "isSample": is_sample,
     }
     return json.dumps(payload, ensure_ascii=True).replace("<", "\\u003c")
 
 
-# Builds the globe document while keeping report content out of executable JavaScript.
+# Builds the global globe document without executing report content as JavaScript.
 def _globe_document(
     anomalies: list[AnomalyRecord], assessments: list[Assessment], is_sample: bool,
+    region_locations: dict[str, tuple[float, float]] | None = None,
 ) -> str:
-    return _GLOBE_HTML.replace("__EARTHWATCH_PAYLOAD__", _globe_payload(anomalies, assessments, is_sample))
+    return _GLOBE_HTML.replace(
+        "__EARTHWATCH_PAYLOAD__", _globe_payload(anomalies, assessments, is_sample, region_locations),
+    )
 
 
-# Displays a draggable Earth with evidence panels populated only from supplied records.
+# Displays worldwide evidence; optional coordinates locate any new feed region precisely.
 def climate_globe(
     anomalies: list[AnomalyRecord], assessments: list[Assessment] | None = None,
-    is_sample: bool = False,
+    is_sample: bool = False, *,
+    region_locations: dict[str, tuple[float, float]] | None = None,
 ) -> None:
-    document = _globe_document(anomalies, assessments or [], is_sample)
+    document = _globe_document(anomalies, assessments or [], is_sample, region_locations)
     if hasattr(st, "iframe"):
-        st.iframe(document, height="content", alt="Interactive Earth with climate observations and agent evidence")
+        st.iframe(document, height="content", alt="Worldwide Earth explorer with climate observations and agent evidence")
     else:
-        import streamlit.components.v1 as components
-
-        components.html(document, height=850, scrolling=True)
+        st.info("The interactive globe requires a Streamlit version with st.iframe. Regional observations remain available below.")
+        status_strip(anomalies, is_sample)
 
 
 _GLOBE_HTML = r'''<!doctype html>
@@ -270,11 +312,11 @@ button,select{font:inherit}button,a,select{touch-action:manipulation}button{curs
 <div class="main"><section class="world" aria-label="Interactive Earth explorer">
 <div class="world-top"><div class="eyebrow">01 / Earth explorer</div><h1>The Earth, in focus.</h1><p>Follow the signals. Explore the evidence.<br>Understand a changing planet.</p></div>
 <div id="viewport"></div><div id="loading" role="status">Loading Earth imagery…</div><div id="fallback" role="status"></div><div id="tooltip"></div>
-<div class="view-label">Eastern Pacific watch<span>Drag to explore · Scroll or pinch to zoom</span></div><div id="canvas-status" role="status" aria-live="polite"></div>
-<div class="legend"><div><span class="dot"></span>Monitored ocean region</div><div><span class="dot amber"></span>Northern Peru</div></div>
-<div class="tools" aria-label="Globe controls"><button id="rotate" aria-pressed="true">Pause rotation</button><button id="reset">Pacific view</button><button id="zoom-in" aria-label="Zoom in">＋</button><button id="zoom-out" aria-label="Zoom out">−</button></div>
-</section><aside class="panel" aria-label="Selected region information"><label for="region" class="eyebrow">Explore a region</label><select id="region"><option value="Nino 1+2">Niño 1+2 · Eastern Pacific</option><option value="Nino 3.4">Niño 3.4 · Central Pacific</option><option value="Northern Peru">Northern Peru · Coastal impacts</option></select>
-<div id="region-body" aria-live="polite"></div><details class="help"><summary>How to explore</summary><ol><li>Drag the Earth or use the region selector.</li><li>Click a highlighted ocean region or the Peru marker.</li><li>Read the dated observation and expand its evidence.</li><li>Use Pause rotation for a stationary view.</li></ol><p>The selector provides keyboard access to every monitored region. Regions without a feed show an empty state.</p></details></aside></div>
+<div class="view-label">Worldwide climate watch<span>Drag to explore · Scroll or pinch to zoom</span></div><div id="canvas-status" role="status" aria-live="polite"></div>
+<div class="legend"><div><span class="dot"></span>Observation supplied</div><div><span class="dot amber"></span>Awaiting coverage</div></div>
+<div class="tools" aria-label="Globe controls"><button id="rotate" aria-pressed="true">Pause rotation</button><button id="reset">World view</button><button id="zoom-in" aria-label="Zoom in">＋</button><button id="zoom-out" aria-label="Zoom out">−</button></div>
+</section><aside class="panel" aria-label="Selected region information"><label for="region" class="eyebrow">Explore a region</label><select id="region"><option value="__world__">Worldwide overview</option></select>
+<div id="region-body" aria-live="polite"></div><details class="help"><summary>How to explore</summary><ol><li>Drag the Earth or use the region selector.</li><li>Click any regional marker or any point on Earth.</li><li>Read the dated observation and expand its evidence.</li><li>Use Pause rotation for a stationary view.</li></ol><p>The selector provides keyboard access to every monitored region. Regions without a feed show an empty state. Markers represent regional centers, not national boundaries.</p></details></aside></div>
 <footer><span>Earth imagery: Three.js Earth texture collection · illustrative surface, not live satellite imagery</span><span id="coverage"></span></footer></div>
 <script id="earthwatch-data" type="application/json">__EARTHWATCH_PAYLOAD__</script>
 <script>
@@ -284,11 +326,13 @@ window.globeTimer = setTimeout(()=>window.globeFallback('The 3D view could not l
 </script>
 <script>
 const data=JSON.parse(document.getElementById('earthwatch-data').textContent);
-const names={'Nino 1+2':'Niño 1+2','Nino 3.4':'Niño 3.4','Northern Peru':'Northern Peru'};
-const descriptions={'Nino 1+2':'Eastern tropical Pacific · near Peru and Ecuador','Nino 3.4':'Central equatorial Pacific · broader ENSO context','Northern Peru':'Coastal impact watch · Piura and Tumbes'};
+const names=Object.create(null);names.__world__='Worldwide overview';
+for(const region of data.regions)names[region.name]=region.name;
+const available=new Set(data.anomalies.map(item=>item.region));
 const select=document.getElementById('region');
 document.getElementById('data-mode').textContent=data.isSample?'SAMPLE DATA / DEMONSTRATION':'SUPPLIED OBSERVATIONS';
-document.getElementById('coverage').textContent='2 ocean regions · 1 coastal focus';
+document.getElementById('coverage').textContent=`Worldwide explorer · ${available.size} regions with supplied observations`;
+for(const region of data.regions){const option=document.createElement('option');option.value=region.name;option.textContent=region.name+(available.has(region.name)?' · observation supplied':' · awaiting coverage');select.append(option);}
 // Uses DOM text nodes for all backend content, including agent-authored findings.
 function add(parent,tag,text,cls='') {const el=document.createElement(tag);el.textContent=text;if(cls)el.className=cls;parent.append(el);return el;}
 // Accepts only navigable HTTP or HTTPS evidence URLs.
@@ -296,22 +340,28 @@ function sourceLink(parent,item){if(!item.url)return;try{const url=new URL(item.
 // Displays only records and assessment evidence supplied by the Python backend.
 function regionPanel(region) {
  const parent=document.getElementById('region-body');parent.replaceChildren();
- add(parent,'h2',names[region]||region).id='region-title';add(parent,'p',descriptions[region]||'No monitored region at this location.','muted');
- const records=data.anomalies.filter(item=>item.region===region).sort((a,b)=>b.observation_date.localeCompare(a.observation_date));
+ add(parent,'h2',names[region]||region).id='region-title';add(parent,'p',region==='__world__'?'Climate observations and evidence from around the world.':'Regional climate observations and evidence.','muted');
+ const records=data.anomalies.filter(item=>region==='__world__'||item.region===region).sort((a,b)=>b.observation_date.localeCompare(a.observation_date));
  const record=records[0];
- if(record){
+ if(region==='__world__'){
+  add(parent,'span',available.size+' regions with observations','badge');add(parent,'p','Worldwide navigation is available. Data coverage depends on the connected feeds.','muted');
+  if(records.length)add(parent,'p','Latest supplied observation: '+records[0].observation_date,'muted');
+  const latest=new Map();for(const item of records)if(!latest.has(item.region))latest.set(item.region,item);
+  for(const item of latest.values()){add(parent,'h3',item.region);add(parent,'p',`${item.value} ${item.unit} · ${item.observation_date}`);add(parent,'p',item.variable.replaceAll('_',' ')+' · '+item.source,'muted');}
+ }else if(record){
   add(parent,'span',record.status==='detected'?'Signal detected':record.status,'badge');
   const reading=add(parent,'div',Number(record.value).toLocaleString(undefined,{maximumFractionDigits:2}),'reading');add(reading,'small',' '+(record.unit==='degC'?'°C':record.unit));
   add(parent,'p',record.variable.replaceAll('_',' '),'muted');
   const meta=add(parent,'dl','','meta');for(const [key,value] of [['Observed',record.observation_date],['Baseline',record.baseline_period],['Source',record.source]]){add(meta,'dt',key);add(meta,'dd',value);}
  }else{add(parent,'span','Awaiting observations','badge');add(parent,'p','No measurements have been supplied for this location.','muted');}
  add(parent,'div','','rule');add(parent,'div',data.isSample?'Sample assessment feed':'Agent assessment feed','eyebrow');
- const ids=new Set((region==='Northern Peru'?data.anomalies:records).map(item=>item.anomaly_id));
+ const ids=new Set(records.map(item=>item.anomaly_id));
  const reports=data.assessments.filter(item=>ids.has(item.anomaly_id));
  if(!reports.length){add(parent,'p','Awaiting agent feed','feed-state');add(parent,'p','No source-backed update has been supplied. New reports will appear when the dashboard receives refreshed backend data.','muted');}
  for(const report of reports){
-  if(region==='Northern Peru'){add(parent,'h3','Potential regional implications');const list=add(parent,'ul','');for(const text of report.regional_implications)add(list,'li',text);if(!report.regional_implications.length)add(parent,'p','No regional implications established.','muted');}
-  else add(parent,'p',report.summary);
+  if(region==='__world__'){const observation=records.find(item=>item.anomaly_id===report.anomaly_id);add(parent,'h3',observation?.region||'Regional assessment');}
+  add(parent,'p',report.summary);
+  if(report.regional_implications.length){add(parent,'h3','Potential regional implications');const list=add(parent,'ul','');for(const text of report.regional_implications)add(list,'li',text);}
   add(parent,'p','Confidence: '+report.confidence,'muted');
   const order={measured:0,reported:1,inferred:2,uncertain:3};
   for(const item of [...report.evidence].sort((a,b)=>order[a.evidence_type]-order[b.evidence_type])){
@@ -320,7 +370,8 @@ function regionPanel(region) {
   }
   if(report.limitations.length){add(parent,'h3','Limitations');for(const text of report.limitations)add(parent,'p',text,'muted');}
  }
- add(parent,'p','An observed anomaly does not by itself establish a flood forecast.','muted');
+ const location=data.regions.find(item=>item.name===region);if(record&&location?.latitude===null)add(parent,'p','Map location not supplied. This report is listed without guessing its coordinates.','muted');
+ add(parent,'p','An observed anomaly alone does not establish a specific disaster forecast.','muted');
 }
 select.addEventListener('change',()=>{regionPanel(select.value);window.dispatchEvent(new CustomEvent('earthwatch-focus',{detail:select.value}));});
 regionPanel(select.value);
@@ -329,7 +380,7 @@ regionPanel(select.value);
 try {
  const THREE=await import('three'); const {OrbitControls}=await import('three/addons/controls/OrbitControls.js');
  const viewport=document.getElementById('viewport');
- const scene=new THREE.Scene();const camera=new THREE.PerspectiveCamera(36,1,.1,100);camera.position.set(-1.55,.55,3.3);
+ const scene=new THREE.Scene();const camera=new THREE.PerspectiveCamera(36,1,.1,100);camera.position.set(3.0,1.4,1.6);
  const renderer=new THREE.WebGLRenderer({antialias:true,alpha:true});renderer.setPixelRatio(Math.min(devicePixelRatio,2));renderer.outputColorSpace=THREE.SRGBColorSpace;renderer.setClearColor(0x000000,0);viewport.append(renderer.domElement);
  renderer.domElement.tabIndex=0;renderer.domElement.setAttribute('aria-label','Interactive Earth. Drag to rotate, scroll to zoom. Use region selector for keyboard navigation.');
  const controls=new OrbitControls(camera,renderer.domElement);controls.enableDamping=true;controls.enablePan=false;controls.minDistance=2.2;controls.maxDistance=5.5;controls.autoRotate=!matchMedia('(prefers-reduced-motion: reduce)').matches;controls.autoRotateSpeed=.3;
@@ -348,25 +399,31 @@ try {
  const atmosphere=new THREE.Mesh(new THREE.SphereGeometry(1.035,64,48),new THREE.ShaderMaterial({vertexShader:'varying vec3 n; varying vec3 v; void main(){vec4 p=modelViewMatrix*vec4(position,1.0);n=normalize(normalMatrix*normal);v=normalize(-p.xyz);gl_Position=projectionMatrix*p;}',fragmentShader:'varying vec3 n; varying vec3 v; void main(){float rim=pow(1.0-abs(dot(normalize(n),normalize(v))),4.0);gl_FragColor=vec4(0.28,0.65,0.95,rim*0.45);}',transparent:true,depthWrite:false,blending:THREE.AdditiveBlending}));scene.add(atmosphere);
  // Converts geographic coordinates to the sphere's equirectangular texture coordinates.
  function xyz(lat,lon,r=1.008){const a=THREE.MathUtils.degToRad(lat),b=THREE.MathUtils.degToRad(lon);return new THREE.Vector3(r*Math.cos(a)*Math.cos(b),r*Math.sin(a),-r*Math.cos(a)*Math.sin(b));}
- const boxes={'Nino 1+2':[-10,0,-90,-80],'Nino 3.4':[-5,5,-170,-120]};const centers={'Nino 1+2':[-5,-85],'Nino 3.4':[0,-145],'Northern Peru':[-5.2,-80.6]};
+ const knownBoxes={'Nino 1+2':[-10,0,-90,-80],'Nino 3.4':[-5,5,-170,-120]};const boxes=Object.fromEntries(Object.entries(knownBoxes).filter(([name])=>available.has(name)));
+ const centers=Object.create(null);for(const region of data.regions)if(region.latitude!==null)centers[region.name]=[region.latitude,region.longitude];
  const overlays={};
  // Draws geographic monitoring boundaries with enough vertices to follow Earth's curvature.
  for(const [region,[south,north,west,east]] of Object.entries(boxes)){
   const points=[];for(let i=0;i<=48;i++)points.push(xyz(south,west+(east-west)*i/48));for(let i=1;i<=24;i++)points.push(xyz(south+(north-south)*i/24,east));for(let i=1;i<=48;i++)points.push(xyz(north,east-(east-west)*i/48));for(let i=1;i<=24;i++)points.push(xyz(north-(north-south)*i/24,west));
   const line=new THREE.Line(new THREE.BufferGeometry().setFromPoints(points),new THREE.LineBasicMaterial({color:0x91ebd0,transparent:true,opacity:.85}));scene.add(line);overlays[region]=line;
  }
- const peru=new THREE.Mesh(new THREE.SphereGeometry(.014,16,12),new THREE.MeshBasicMaterial({color:0xf5cd85}));peru.position.copy(xyz(-5.2,-80.6,1.018));scene.add(peru);
- const ring=new THREE.Mesh(new THREE.RingGeometry(.023,.029,48),new THREE.MeshBasicMaterial({color:0xf5cd85,side:THREE.DoubleSide,transparent:true,opacity:.75}));ring.position.copy(xyz(-5.2,-80.6,1.012));ring.lookAt(ring.position.clone().multiplyScalar(2));scene.add(ring);
+ const markers=[];
+ // Marks every global navigation center and every geolocated backend region.
+ for(const [name,coordinates] of Object.entries(centers)){
+  const color=available.has(name)?0x99efd4:0xeac284;
+  const marker=new THREE.Mesh(new THREE.SphereGeometry(.012,16,12),new THREE.MeshBasicMaterial({color}));marker.position.copy(xyz(...coordinates,1.016));marker.userData.region=name;scene.add(marker);markers.push(marker);
+  const ring=new THREE.Mesh(new THREE.RingGeometry(.021,.026,32),new THREE.MeshBasicMaterial({color,side:THREE.DoubleSide,transparent:true,opacity:.65}));ring.position.copy(xyz(...coordinates,1.01));ring.lookAt(ring.position.clone().multiplyScalar(2));scene.add(ring);
+ }
  let targetPosition=null;
  // Focuses a region and stops rotation so a selected area remains available to inspect.
- function focus(region){const position=centers[region];if(!position)return;rotation(false);targetPosition=xyz(...position,3.6);for(const [key,line] of Object.entries(overlays)){line.material.color.set(key===region?0xffffff:0x91ebd0);line.material.opacity=key===region?1:.6;}document.getElementById('canvas-status').textContent='Viewing '+names[region];}
+ function focus(region){if(region==='__world__'){rotation(false);targetPosition=new THREE.Vector3(3.0,1.4,1.6);return;}const position=centers[region];if(!position){document.getElementById('canvas-status').textContent='Map location not supplied for '+region;return;}rotation(false);targetPosition=xyz(...position,3.6);for(const [key,line] of Object.entries(overlays)){line.material.color.set(key===region?0xffffff:0x91ebd0);line.material.opacity=key===region?1:.6;}document.getElementById('canvas-status').textContent='Viewing '+names[region];}
  window.addEventListener('earthwatch-focus',event=>focus(event.detail));
- document.getElementById('reset').onclick=()=>{focus('Nino 1+2');targetPosition=xyz(8,-115,3.7);};
+ document.getElementById('reset').onclick=()=>{select.value='__world__';regionPanel('__world__');focus('__world__');document.getElementById('canvas-status').textContent='Worldwide view';};
  document.getElementById('zoom-in').onclick=()=>{targetPosition=null;camera.position.multiplyScalar(Math.max(2.2/camera.position.length(),.85));controls.update();};document.getElementById('zoom-out').onclick=()=>{targetPosition=null;camera.position.multiplyScalar(Math.min(5.5/camera.position.length(),1.15));controls.update();};
  controls.addEventListener('start',()=>{targetPosition=null;rotation(false);});
  const ray=new THREE.Raycaster();const pointer=new THREE.Vector2();let down=null;
  // Picks the visible Earth surface, preventing clicks through to its far side.
- function pick(event){const rect=renderer.domElement.getBoundingClientRect();pointer.set((event.clientX-rect.left)/rect.width*2-1,-(event.clientY-rect.top)/rect.height*2+1);ray.setFromCamera(pointer,camera);const hit=ray.intersectObject(earth)[0];if(!hit)return null;const p=hit.point.clone().normalize();const lat=THREE.MathUtils.radToDeg(Math.asin(p.y)),lon=-THREE.MathUtils.radToDeg(Math.atan2(p.z,p.x));let region=null;for(const [name,[s,n,w,e]]of Object.entries(boxes)){if(lat>=s&&lat<=n&&lon>=w&&lon<=e)region=name;}if(hit.point.distanceTo(peru.position)<.065)region='Northern Peru';return {region,lat,lon};}
+ function pick(event){const rect=renderer.domElement.getBoundingClientRect();pointer.set((event.clientX-rect.left)/rect.width*2-1,-(event.clientY-rect.top)/rect.height*2+1);ray.setFromCamera(pointer,camera);const hit=ray.intersectObject(earth)[0];if(!hit)return null;const p=hit.point.clone().normalize();const lat=THREE.MathUtils.radToDeg(Math.asin(p.y)),lon=-THREE.MathUtils.radToDeg(Math.atan2(p.z,p.x));let region=null;for(const [name,[s,n,w,e]]of Object.entries(boxes)){if(lat>=s&&lat<=n&&lon>=w&&lon<=e)region=name;}const markerHit=ray.intersectObjects(markers).find(item=>item.distance<=hit.distance+.055);if(markerHit)region=markerHit.object.userData.region;else{const nearby=markers.map(marker=>({name:marker.userData.region,distance:hit.point.distanceTo(marker.position)})).sort((a,b)=>a.distance-b.distance)[0];if(nearby?.distance<.055)region=nearby.name;}return {region,lat,lon};}
  renderer.domElement.addEventListener('pointerdown',event=>{down=[event.clientX,event.clientY];});
  renderer.domElement.addEventListener('pointerup',event=>{if(!down||Math.hypot(event.clientX-down[0],event.clientY-down[1])>6)return;down=null;const hit=pick(event);if(!hit)return;if(hit.region){select.value=hit.region;regionPanel(hit.region);focus(hit.region);}else{const location=`${hit.lat.toFixed(1)}°, ${hit.lon.toFixed(1)}°`;select.selectedIndex=-1;regionPanel(location);document.getElementById('canvas-status').textContent=location+' · No monitoring feed at this location';}});
  const tooltip=document.getElementById('tooltip');

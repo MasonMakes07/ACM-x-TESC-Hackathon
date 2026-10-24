@@ -186,6 +186,11 @@ def test_globe_component_renders(
     anomalies, assessment = records
     app = AppTest.from_function(_render_globe, args=(anomalies, assessment)).run()
     assert not app.exception
+    if legacy:
+        assert not app.get("iframe")
+        assert "requires a Streamlit version with st.iframe" in _visible_text(app)
+        assert app.metric
+        return
     document = app.get("iframe")[0].proto.srcdoc
     assert 'id="region"' in document
     assert 'id="rotate"' in document
@@ -209,3 +214,47 @@ def test_globe_payload_escapes_script_content(records: tuple[list[AnomalyRecord]
     assert '<script>' not in payload
     assert decoded['anomalies'][0]['anomaly_id'] == anomalies[0].anomaly_id
     assert decoded['isSample'] is False
+
+
+# Global navigation remains available even when no connected feed supplies observations.
+def test_globe_covers_world_without_inventing_observations() -> None:
+    from dashboard.components import _globe_payload
+
+    payload = json.loads(_globe_payload([], [], False))
+    names = {item['name'] for item in payload['regions']}
+    assert {'Africa', 'Europe', 'Asia', 'North America', 'South America', 'Oceania',
+            'Antarctica', 'Arctic', 'Pacific Ocean', 'Atlantic Ocean', 'Indian Ocean'} <= names
+    assert not payload['anomalies']
+    assert not payload['assessments']
+
+
+# Arbitrary regional feeds can locate markers anywhere without editing shared schemas.
+def test_globe_accepts_worldwide_feed_locations(records: tuple[list[AnomalyRecord], Assessment]) -> None:
+    from dashboard.components import _globe_payload
+
+    anomalies, assessment = records
+    region = 'Tokyo'
+    anomaly = anomalies[0].model_copy(update={'region': region})
+    payload = json.loads(_globe_payload([anomaly], [assessment], False, {region: (35.68, 139.69)}))
+    location = next(item for item in payload['regions'] if item['name'] == region)
+    assert (location['latitude'], location['longitude']) == (35.68, 139.69)
+    assert payload['anomalies'][0]['region'] == region
+
+
+# Missing locations stay unlocated instead of being silently assigned to Peru.
+def test_globe_keeps_unknown_region_unmapped(records: tuple[list[AnomalyRecord], Assessment]) -> None:
+    from dashboard.components import _globe_payload
+
+    anomalies, _ = records
+    payload = json.loads(_globe_payload([anomalies[0].model_copy(update={'region': 'Unknown basin'})], [], False))
+    location = next(item for item in payload['regions'] if item['name'] == 'Unknown basin')
+    assert location['latitude'] is None and location['longitude'] is None
+
+
+# Bad feed coordinates cannot create off-Earth or invalid WebGL positions.
+@pytest.mark.parametrize('coordinates', [(91, 0), (0, 181), (float('nan'), 0), (0, float('inf')), (True, 0), ('35', 0), (1,)])
+def test_globe_rejects_invalid_coordinates(coordinates: tuple[object, ...]) -> None:
+    from dashboard.components import _globe_payload
+
+    with pytest.raises(ValueError):
+        _globe_payload([], [], False, {'New region': coordinates})
