@@ -284,11 +284,36 @@ def render_briefing(selected: AnomalyRecord, result: InvestigationResult | None,
     components.briefing(result.assessment, selected, severity=severity)
 
 
+# Renders a finished assessment for the worldwide explorer (it has no globe event panel).
+def render_assessment(assessment: Assessment, assessment_is_sample: bool) -> None:
+    if assessment_is_sample:
+        show_sample_banner("Assessment")
+    st.subheader(assessment.summary)
+    st.write(f"**Confidence:** {assessment.confidence}")
+    sections = {
+        "Supporting findings": assessment.supporting_findings,
+        "Contradictory findings": assessment.contradictory_findings,
+        "Regional implications": assessment.regional_implications,
+        "Limitations": assessment.limitations,
+        "Recommended next steps": assessment.recommended_next_steps,
+    }
+    for heading, items in sections.items():
+        if items:
+            st.markdown(f"**{heading}**")
+            st.markdown("\n".join(f"- {item}" for item in items))
+    components.evidence_list(assessment.evidence)
+
+
 # Builds the full EarthWatch page.
 def main() -> None:
     st.set_page_config(page_title="EarthWatch", page_icon="🌍", layout="wide")
     apply_theme()
     st.title("EarthWatch")
+    mode = st.radio("Monitoring view", ["Worldwide locations", "Pacific ocean indices"], horizontal=True)
+    if mode == "Worldwide locations":
+        from dashboard.global_explorer import render_global_explorer
+        render_global_explorer(render_assessment)
+        return
     st.caption("Worldwide climate events and anomaly awareness · explore evidence, uncertainty, and recommended actions")
     try:
         anomalies, anomalies_are_sample = cached_anomalies()
