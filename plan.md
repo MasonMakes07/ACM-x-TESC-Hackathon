@@ -9,6 +9,10 @@ tool bound to the selected coordinates. US locations also get nearby NOAA NWS
 station observations when fresh data are available, with timestamps, distance,
 and explicit model/station comparison. Grok requires configured API credentials
 and credits; failures do not return a fake or historical substitute.
+Multi-source research now adds NOAA/NWS alerts, MET Norway forecasts, and NASA
+Terra/Aqua true-color imagery to live bot investigations. Satellite imagery
+is dated and displayed, without automatic pixel interpretation or invented
+weather measurements. All tools remain bound to the selected coordinates.
 
 The product now supports locations worldwide. The original Peru-focused proposal
 below is retained as historical project context and a replay case study. Its

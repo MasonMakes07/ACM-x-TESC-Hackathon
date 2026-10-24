@@ -90,6 +90,8 @@ def render_live_weather(location):
             st.write(f'[{item.evidence_type}] {item.claim}')
             if item.url:
                 st.caption(f'[Source]({item.url}) | Date: {item.source_date}')
+                if item.source.startswith('NASA GIBS ') and item.url.startswith('https://gibs.earthdata.nasa.gov/'):
+                    st.image(item.url,caption=f'{item.source} — scene date {item.source_date}; imagery not automatically interpreted',width=400)
         for limitation in assessment.limitations:
             st.caption(limitation)
     st.caption('[Weather data by Open-Meteo](https://open-meteo.com/) (CC BY 4.0). Use Climate history for historical baseline comparisons.')

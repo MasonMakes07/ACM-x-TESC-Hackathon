@@ -41,6 +41,7 @@ def investigate(
     context = context or build_context(anomaly)
     from agents.prompts import LIVE_INVESTIGATOR_PROMPT
     live = is_live_weather(anomaly)
+    from agents.live_tools import LIVE_TOOL_NAMES
     emit(on_progress, AGENT_NAME, "Researching the signal and alternatives.")
     user_prompt = (
         f"As-of date: {toolbox.as_of_date.isoformat()}\n"
@@ -57,5 +58,5 @@ def investigate(
         output_model=InvestigationReport,
         on_progress=on_progress,
         toolbox=toolbox,
-        tool_names=('get_current_weather',) if live else TOOLS_BY_PROFILE[context.profile],
+        tool_names=LIVE_TOOL_NAMES if live else TOOLS_BY_PROFILE[context.profile],
     )

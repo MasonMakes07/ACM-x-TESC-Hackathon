@@ -49,6 +49,7 @@ def assess_regional_impact(
     context = context or build_context(anomaly)
     from agents.prompts import LIVE_IMPACT_PROMPT
     live = is_live_weather(anomaly)
+    from agents.live_tools import LIVE_TOOL_NAMES
     emit(on_progress, AGENT_NAME, _progress_message(context))
     user_prompt = (
         f"As-of date: {toolbox.as_of_date.isoformat()}\n"
@@ -65,5 +66,5 @@ def assess_regional_impact(
         output_model=ImpactReport,
         on_progress=on_progress,
         toolbox=toolbox,
-        tool_names=('get_current_weather',) if live else TOOLS_BY_PROFILE[context.profile],
+        tool_names=LIVE_TOOL_NAMES if live else TOOLS_BY_PROFILE[context.profile],
     )

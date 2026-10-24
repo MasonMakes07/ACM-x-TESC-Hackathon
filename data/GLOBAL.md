@@ -61,6 +61,36 @@ reports. API keys remain local and are never included in tool results.
 
 NWS source definitions: https://www.weather.gov/documentation/services-web-api
 
+### National agencies and satellites
+
+Live Investigators and Impact bots have three tools: `get_current_weather`,
+`get_national_weather`, and `get_satellite_imagery`.
+All require the selected latitude/longitude; attempts to change location or use
+current research for a historical as-of date are rejected. Results are reused
+within one investigation and each retrieved source is recorded in the ledger.
+
+`data.research_sources.national_weather(location)` retrieves NOAA/NWS station
+observations and active point alerts for US locations, plus MET Norway's global
+Locationforecast. Alert retrieval failure does not mean there are no alerts.
+Forecast issuance/valid times remain explicit, forecasts are not measurements,
+and wind units are converted from m/s to km/h. MET Norway attribution: CC BY 4.0.
+
+`satellite_imagery(location, scene_date)` downloads actual PNG true-color scenes
+from NASA GIBS MODIS Terra and Aqua. Dates must be within the past seven UTC days.
+The one-degree bounding box, scene date, source layer, retrieval timestamp, and
+source URL accompany each image. Transparent blank tiles and server error pages
+are rejected. Current-day availability depends on satellite overpasses and
+processing; retry a prior day explicitly. Satellite data have different timing
+from current ground weather. No pixel interpretation or numerical temperature,
+cloud, or rainfall inference is performed. The dashboard shows the retrieved
+imagery below the assessment. Images are locally cached for an hour.
+
+National weather and NASA GIBS need no additional API keys.
+
+Source docs:
+- https://api.met.no/weatherapi/locationforecast/2.0/documentation
+- https://nasa-gibs.github.io/gibs-api-docs/access-basics/
+
 ## Historical climate
 
 The worldwide scope supersedes the original Peru-only focus. The original

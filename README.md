@@ -42,6 +42,11 @@ The default **Worldwide locations** view supports:
   Impact, Skeptic/Reviser, and Action bots against the displayed live snapshot.
   Live investigations cannot substitute historical weather or another location.
   Grok requires `XAI_API_KEY`, `XAI_MODEL`, and available xAI credits in local `.env`.
+- Live bot research tools also retrieve **NOAA/NWS official alerts**, **MET Norway
+  global forecasts**, and **NASA GIBS Terra/Aqua satellite imagery**. Scene dates,
+  issue times and source links stay attached. Satellite imagery is shown with
+  the assessment; it is not automatically interpreted as weather measurements.
+
 
 Choose a country, search for a place, select a match, and click **Load today's
 weather**. For baseline comparisons, switch to **Climate history**, select a year,
@@ -61,6 +66,8 @@ Source: [Open-Meteo historical weather](https://open-meteo.com/en/docs/historica
 using Copernicus ERA5 for climate history;
 [Open-Meteo weather API](https://open-meteo.com/en/docs) for today's conditions.
 Independent US observations: [NOAA NWS API](https://www.weather.gov/documentation/services-web-api).
+Additional official forecast: [MET Norway](https://api.met.no/weatherapi/locationforecast/2.0/documentation).
+Satellite imagery: [NASA GIBS](https://nasa-gibs.github.io/gibs-api-docs/access-basics/).
 The live source uses a five-minute cache, rejects expired responses on failures,
 and shows the conditions timestamp and retrieval time in the selected timezone.
 Place search: [Open-Meteo geocoding](https://open-meteo.com/en/docs/geocoding-api).

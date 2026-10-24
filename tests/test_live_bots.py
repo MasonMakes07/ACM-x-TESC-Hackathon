@@ -107,7 +107,7 @@ def test_live_workflow_uses_current_tool_only(snapshot,monkeypatch):
     record=translator.live_weather_record(snapshot)
     report=investigator.investigate(None,box(snapshot),record,lambda event:None)
     regional_impact.assess_regional_impact(None,box(snapshot),record,report,lambda event:None)
-    assert all(call['tool_names']==('get_current_weather',) for call in calls)
+    assert all(call['tool_names']==live_tools.LIVE_TOOL_NAMES for call in calls)
     assert "TODAY" in calls[0]['system_prompt']
 
 

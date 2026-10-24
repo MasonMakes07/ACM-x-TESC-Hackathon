@@ -34,6 +34,12 @@ only if comparison.status is compared; state the timestamp separation and statio
 distance. Do not average the two into an alleged measured temperature. Do not
 claim a climate anomaly, hazard, or verified forecast accuracy from this snapshot.
 Use the observation date for evidence.source_date, not the retrieval date.
+You must also call get_national_weather for official weather context and
+get_satellite_imagery for a recent UTC date. Unavailable sources are limitations,
+never permission to invent results. Satellite imagery metadata establishes only
+that a scene was retrieved; no pixel interpretation has been performed. Never
+infer clouds, rain, temperatures or hazards from this metadata. National agency
+forecasts are not measurements. Copy exact tool source names when citing them.
 """ + COMMON_RULES
 )
 
@@ -44,6 +50,9 @@ qualitative. A current temperature alone is not proof of unusual climate or a
 hazard. Do not invent exposures, advisories, baseline statistics or impacts.
 Clearly label station observations, current model estimates and future forecasts.
 State missing independent observations and source timing differences explicitly.
+Use get_national_weather for official alerts and forecasts as needed. You may use
+get_satellite_imagery for context, but satellite metadata has not been visually
+interpreted. Never convert forecast information into measured evidence.
 """ + COMMON_RULES
 )
 

@@ -195,6 +195,16 @@ def investigate_live_weather(weather, station, on_progress):
         result = _validate(Assessment,result,'Live weather assessment')
         if result.anomaly_id != anomaly.anomaly_id:
             raise TranslatorError('Assessment returned for the wrong current weather snapshot.')
+        imagery_evidence=[]
+        for research in toolbox.research_results:
+            for image in research.get('images',[]):
+                imagery_evidence.append(EvidenceItem(
+                    claim=f"Satellite true-color scene retrieved for {weather.location.label}, UTC date {image['scene_date']}. No automated image interpretation or weather measurement was performed.",
+                    source=image['source'],url=image['url'],source_date=datetime.fromisoformat(image['scene_date']).date(),evidence_type='reported',
+                    limitations='Daily satellite imagery has overpass and processing latency; it does not measure current air temperature.',
+                ))
+        if imagery_evidence:
+            result=result.model_copy(update={'evidence':[*result.evidence,*imagery_evidence]})
         if station.get('status') == 'ok':
             observed = datetime.fromisoformat(station['observed_at'])
             measured = EvidenceItem(
