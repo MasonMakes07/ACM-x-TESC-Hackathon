@@ -316,7 +316,7 @@ button,select{font:inherit}button,a,select{touch-action:manipulation}button{curs
 <div class="legend"><div><span class="dot"></span>Observation supplied</div><div><span class="dot amber"></span>Awaiting coverage</div></div>
 <div class="tools" aria-label="Globe controls"><button id="rotate" aria-pressed="true">Pause rotation</button><button id="reset">World view</button><button id="zoom-in" aria-label="Zoom in">＋</button><button id="zoom-out" aria-label="Zoom out">−</button></div>
 </section><aside class="panel" aria-label="Selected region information"><label for="region" class="eyebrow">Explore a region</label><select id="region"><option value="__world__">Worldwide overview</option></select>
-<div id="region-body" aria-live="polite"></div><details class="help"><summary>How to explore</summary><ol><li>Drag the Earth or use the region selector.</li><li>Click any regional marker or any point on Earth.</li><li>Read the dated observation and expand its evidence.</li><li>Use Pause rotation for a stationary view.</li></ol><p>The selector provides keyboard access to every monitored region. Regions without a feed show an empty state. Markers represent regional centers, not national boundaries.</p></details></aside></div>
+<div id="region-body" aria-live="polite"></div><details class="help"><summary>How to explore</summary><ol><li>Drag the Earth or use the region selector.</li><li>Click any regional marker or any point on Earth.</li><li>Read the dated observation and expand its evidence.</li><li>When rotation is on, dragging pauses it and it resumes after 3 seconds. Use Pause rotation for a stationary view.</li></ol><p>The selector provides keyboard access to every monitored region. Regions without a feed show an empty state. Markers represent regional centers, not national boundaries.</p></details></aside></div>
 <footer><span>Earth imagery: Three.js Earth texture collection · illustrative surface, not live satellite imagery</span><span id="coverage"></span></footer></div>
 <script id="earthwatch-data" type="application/json">__EARTHWATCH_PAYLOAD__</script>
 <script>
@@ -385,9 +385,9 @@ try {
  renderer.domElement.tabIndex=0;renderer.domElement.setAttribute('aria-label','Interactive Earth. Drag to rotate, scroll to zoom. Use region selector for keyboard navigation.');
  const controls=new OrbitControls(camera,renderer.domElement);controls.enableDamping=true;controls.enablePan=false;controls.minDistance=2.2;controls.maxDistance=5.5;controls.autoRotate=!matchMedia('(prefers-reduced-motion: reduce)').matches;controls.autoRotateSpeed=.3;
  controls.listenToKeyEvents(renderer.domElement);
- const button=document.getElementById('rotate');
+ const button=document.getElementById('rotate');let rotationTimer=null;let resumeAfterInteraction=false;
  // Keeps the motion control label synchronized with its actual state.
- function rotation(value){controls.autoRotate=value;button.textContent=value?'Pause rotation':'Resume rotation';button.setAttribute('aria-pressed',String(value));}
+ function rotation(value,temporary=false){if(!temporary){clearTimeout(rotationTimer);resumeAfterInteraction=false;}controls.autoRotate=value;button.textContent=value?'Pause rotation':'Resume rotation';button.setAttribute('aria-pressed',String(value));}
  rotation(controls.autoRotate);button.onclick=()=>rotation(!controls.autoRotate);
  scene.add(new THREE.AmbientLight(0xa6bedd,1.8));const sun=new THREE.DirectionalLight(0xfff1dc,2.5);scene.add(sun);
  const loader=new THREE.TextureLoader();const root='https://threejs.org/examples/textures/planets/';
@@ -420,7 +420,9 @@ try {
  window.addEventListener('earthwatch-focus',event=>focus(event.detail));
  document.getElementById('reset').onclick=()=>{select.value='__world__';regionPanel('__world__');focus('__world__');document.getElementById('canvas-status').textContent='Worldwide view';};
  document.getElementById('zoom-in').onclick=()=>{targetPosition=null;camera.position.multiplyScalar(Math.max(2.2/camera.position.length(),.85));controls.update();};document.getElementById('zoom-out').onclick=()=>{targetPosition=null;camera.position.multiplyScalar(Math.min(5.5/camera.position.length(),1.15));controls.update();};
- controls.addEventListener('start',()=>{targetPosition=null;rotation(false);});
+ // Temporarily suspends automatic motion while dragging, then resumes the prior spin preference.
+ controls.addEventListener('start',()=>{targetPosition=null;resumeAfterInteraction=controls.autoRotate||resumeAfterInteraction;clearTimeout(rotationTimer);rotation(false,true);});
+ controls.addEventListener('end',()=>{if(resumeAfterInteraction)rotationTimer=setTimeout(()=>rotation(true),3000);});
  const ray=new THREE.Raycaster();const pointer=new THREE.Vector2();let down=null;
  // Picks the visible Earth surface, preventing clicks through to its far side.
  function pick(event){const rect=renderer.domElement.getBoundingClientRect();pointer.set((event.clientX-rect.left)/rect.width*2-1,-(event.clientY-rect.top)/rect.height*2+1);ray.setFromCamera(pointer,camera);const hit=ray.intersectObject(earth)[0];if(!hit)return null;const p=hit.point.clone().normalize();const lat=THREE.MathUtils.radToDeg(Math.asin(p.y)),lon=-THREE.MathUtils.radToDeg(Math.atan2(p.z,p.x));let region=null;for(const [name,[s,n,w,e]]of Object.entries(boxes)){if(lat>=s&&lat<=n&&lon>=w&&lon<=e)region=name;}const markerHit=ray.intersectObjects(markers).find(item=>item.distance<=hit.distance+.055);if(markerHit)region=markerHit.object.userData.region;else{const nearby=markers.map(marker=>({name:marker.userData.region,distance:hit.point.distanceTo(marker.position)})).sort((a,b)=>a.distance-b.distance)[0];if(nearby?.distance<.055)region=nearby.name;}return {region,lat,lon};}
@@ -434,6 +436,6 @@ try {
  // Keeps lighting tied to the viewing direction for a legible, naturally shaded surface.
  renderer.setAnimationLoop(()=>{const elapsed=clock.getElapsedTime(),delta=Math.min(elapsed-previous,.05);previous=elapsed;if(document.hidden)return;if(targetPosition){camera.position.lerp(targetPosition,1-Math.exp(-delta*5));if(camera.position.distanceTo(targetPosition)<.002)targetPosition=null;}controls.update(delta);sun.position.copy(camera.position).add(new THREE.Vector3(-2,2,1));renderer.render(scene,camera);});
  clearTimeout(window.globeTimer);document.getElementById('loading').hidden=true;document.getElementById('fallback').style.display='none';
- window.addEventListener('pagehide',()=>{renderer.setAnimationLoop(null);controls.dispose();renderer.dispose();});
+ window.addEventListener('pagehide',()=>{clearTimeout(rotationTimer);renderer.setAnimationLoop(null);controls.dispose();renderer.dispose();});
 } catch(error){clearTimeout(window.globeTimer);window.globeFallback('The 3D view is unavailable. Use the region selector to explore observations and evidence.');console.error('EarthWatch globe:',error);}
 </script></body></html>'''
