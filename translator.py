@@ -133,3 +133,48 @@ def investigate_anomaly(
     if assessment.anomaly_id != anomaly_id:
         raise TranslatorError("Assessment returned for the wrong anomaly.")
     return assessment, False
+
+# Worldwide monitoring uses location objects rather than the Pacific index allow-list.
+def search_world_locations(query, country_code=None):
+    from data.locations import search_locations
+    try:
+        return search_locations(query, country_code)
+    except Exception as error:
+        raise TranslatorError('Could not search locations. Try again or enter coordinates.') from error
+
+
+def load_location_climate(location, year):
+    from analysis.global_climate import analyze_location
+    try:
+        return analyze_location(location, year)
+    except Exception as error:
+        logger.exception('Location climate retrieval failed')
+        raise TranslatorError('Could not load climate data for this location. Check the dates and try again.') from error
+
+
+def investigate_location(climate, anomaly_id, on_progress):
+    """Investigate only records from the selected location, never Peru sample data."""
+    from schemas.assessment import EvidenceItem
+    anomaly = next((item for item in climate.anomalies if item.anomaly_id == anomaly_id), None)
+    if anomaly is None:
+        raise TranslatorError('The observation does not belong to this location and period.')
+    try:
+        result = workflow.run_investigation(anomaly, on_progress)
+    except NotImplementedError:
+        on_progress(ProgressEvent(timestamp=datetime.now(timezone.utc), agent='Statistical analysis', message=f'Reviewed {anomaly.region} against its {anomaly.baseline_period} calendar-month baseline.'))
+        assessment = Assessment(
+            anomaly_id=anomaly.anomaly_id,
+            summary=f'{anomaly.region}: {anomaly.variable.lower()} is {anomaly.status}.',
+            evidence=[EvidenceItem(claim=f'{anomaly.value:g} {anomaly.unit} on {anomaly.observation_date}; {anomaly.detection_method}', source='Open-Meteo / Copernicus ERA5', source_date=anomaly.observation_date, evidence_type='reported', url=anomaly.source, limitations='Reanalysis grid estimate, not a direct station measurement.')],
+            supporting_findings=[anomaly.detection_method],
+            regional_implications=[f'This result describes the grid cell near {climate.location.label}; it is not a country-wide average.'],
+            confidence='inconclusive' if anomaly.status == 'inconclusive' else 'moderate',
+            limitations=['Statistical assessment only; the Grok investigation workflow is not implemented.', 'Temperature and precipitation departures do not establish hazard impacts or causality.', 'Missing data and zero baseline variance can prevent standardized detection.'],
+            recommended_next_steps=[f'Check the national meteorological service and local hazard authorities for {climate.location.country or climate.location.label}.'])
+        return assessment, True
+    except Exception as error:
+        raise TranslatorError('The location investigation failed.') from error
+    assessment = _validate(Assessment, result, 'Location assessment')
+    if assessment.anomaly_id != anomaly_id:
+        raise TranslatorError('Assessment returned for the wrong location observation.')
+    return assessment, False
