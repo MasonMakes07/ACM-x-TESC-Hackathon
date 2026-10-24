@@ -12,7 +12,7 @@ import streamlit as st
 import translator
 from dashboard import components
 from dashboard.charts import observation_chart
-from dashboard.maps import region_map
+from dashboard.globe import render_globe
 from dashboard.theme import apply_theme
 from schemas.anomaly import AnomalyRecord
 from schemas.assessment import Assessment, ProgressEvent
@@ -125,18 +125,14 @@ def run_investigation(anomaly: AnomalyRecord) -> None:
     stored_results()[anomaly.anomaly_id] = result
 
 
-# Renders the Overview tab: monitoring status, region map and anomaly cards.
+# Renders the Overview tab: monitoring status and anomaly cards (the globe is beside it).
 def render_overview(
     anomalies: list[AnomalyRecord], anomalies_are_sample: bool, selected: AnomalyRecord
 ) -> None:
     components.status_strip(anomalies, anomalies_are_sample)
-    map_column, cards_column = st.columns([3, 2])
-    with map_column:
-        st.plotly_chart(region_map(selected.region), width="stretch")
-    with cards_column:
-        st.subheader("Detected signals")
-        for anomaly in anomalies:
-            components.anomaly_card(anomaly, anomaly.anomaly_id == selected.anomaly_id)
+    st.subheader("Detected signals")
+    for anomaly in anomalies:
+        components.anomaly_card(anomaly, anomaly.anomaly_id == selected.anomaly_id)
 
 
 # Renders the Climate Explorer tab: the observation chart and the anomaly detail view.
@@ -210,7 +206,7 @@ def main() -> None:
     st.set_page_config(page_title="EarthWatch", page_icon="🌊", layout="wide")
     apply_theme()
     st.title("EarthWatch")
-    st.caption("Pacific climate intelligence · eastern tropical Pacific → northern Peru")
+    st.caption("Global climate intelligence · first monitored: eastern tropical Pacific and northern Peru")
     try:
         anomalies, anomalies_are_sample = cached_anomalies()
     except TranslatorError as error:
@@ -226,22 +222,25 @@ def main() -> None:
     series, series_is_sample = load_series(selected.region)
     threshold, replay_until = demo_controls(anomalies, series)
 
-    st.markdown(f"**Selected signal:** {anomaly_label(selected)}")
-    if st.button("Run Investigation", type="primary"):
-        run_investigation(selected)
-    result = stored_results().get(selected.anomaly_id)
-    if result is not None and result.error:
-        st.error(result.error)
-
-    overview, explorer, investigation, briefing = st.tabs(TAB_NAMES)
-    with overview:
-        render_overview(anomalies, anomalies_are_sample, selected)
-    with explorer:
-        render_explorer(selected, series, series_is_sample, threshold, replay_until)
-    with investigation:
-        render_investigation(selected, result)
-    with briefing:
-        render_briefing(selected, result)
+    globe_column, dashboard_column = st.columns([3, 2], gap="medium")
+    with globe_column:
+        render_globe(anomalies, selected.region)
+        st.caption(f"Selected signal: {anomaly_label(selected)}")
+    with dashboard_column:
+        if st.button("Run Investigation", type="primary", width="stretch"):
+            run_investigation(selected)
+        result = stored_results().get(selected.anomaly_id)
+        if result is not None and result.error:
+            st.error(result.error)
+        overview, explorer, investigation, briefing = st.tabs(TAB_NAMES)
+        with overview:
+            render_overview(anomalies, anomalies_are_sample, selected)
+        with explorer:
+            render_explorer(selected, series, series_is_sample, threshold, replay_until)
+        with investigation:
+            render_investigation(selected, result)
+        with briefing:
+            render_briefing(selected, result)
 
 
 main()
