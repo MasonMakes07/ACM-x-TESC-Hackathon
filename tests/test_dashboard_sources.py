@@ -46,3 +46,10 @@ def test_sources_are_ordered_by_strength():
         _item(source="Data", url="https://b.example", evidence_type="measured"),
     ])
     assert [row.name for row in rows] == ["Data", "Guess"]
+
+
+# Checks a source that is itself a web address becomes the link, with a readable name.
+def test_source_that_is_a_url_becomes_the_link():
+    rows = collect_sources([_item(source="https://www.cpc.ncep.noaa.gov/data/indices/sstoi.indices", url=None)])
+    assert rows[0].url == "https://www.cpc.ncep.noaa.gov/data/indices/sstoi.indices"
+    assert rows[0].name == "Data file at www.cpc.ncep.noaa.gov"

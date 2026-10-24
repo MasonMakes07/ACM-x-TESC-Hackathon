@@ -37,6 +37,18 @@ def safe_url(url: str | None) -> str | None:
     return url if parts.scheme.lower() in {"http", "https"} and parts.netloc else None
 
 
+# Returns the link for an item: its url, or its source text when that is itself a web link.
+def item_url(item: EvidenceItem) -> str | None:
+    return safe_url(item.url) or safe_url(item.source)
+
+
+# Returns a readable name, using the host when the source is only a web address.
+def item_name(item: EvidenceItem) -> str:
+    if safe_url(item.source):
+        return f"Data file at {urlsplit(item.source).netloc}"
+    return item.source
+
+
 # Orders evidence types from strongest to weakest, unknown types last.
 def _kind_rank(kind: str) -> int:
     return EVIDENCE_ORDER.index(kind) if kind in EVIDENCE_ORDER else len(EVIDENCE_ORDER)
@@ -46,14 +58,14 @@ def _kind_rank(kind: str) -> int:
 def collect_sources(evidence: list[EvidenceItem]) -> list[SourceRow]:
     grouped: dict[str, list[EvidenceItem]] = {}
     for item in evidence:
-        grouped.setdefault(safe_url(item.url) or f"name:{item.source}", []).append(item)
+        grouped.setdefault(item_url(item) or f"name:{item.source}", []).append(item)
     rows = []
     for items in grouped.values():
         kinds = sorted({item.evidence_type for item in items}, key=_kind_rank)
         dates = sorted({str(item.source_date) for item in items if item.source_date})
         rows.append(SourceRow(
-            name=items[0].source,
-            url=safe_url(items[0].url),
+            name=item_name(items[0]),
+            url=item_url(items[0]),
             source_date=", ".join(dates) or "undated",
             kinds=tuple(kinds),
             claims=tuple(dict.fromkeys(item.claim for item in items)),
