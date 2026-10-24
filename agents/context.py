@@ -68,8 +68,14 @@ def build_context(anomaly: AnomalyRecord) -> AnomalyContext:
 # Returns the last date whose data was available when the anomaly was observed.
 def infer_as_of_date(anomaly: AnomalyRecord) -> date:
     observed = anomaly.observation_date
+    if is_live_weather(anomaly):
+        return observed
     is_monthly_value = observed.day == 1 and "7 days" not in anomaly.unit
     if not is_monthly_value:
         return observed
     last_day = calendar.monthrange(observed.year, observed.month)[1]
     return observed.replace(day=last_day)
+
+
+def is_live_weather(anomaly: AnomalyRecord) -> bool:
+    return anomaly.variable == 'Current air temperature' and anomaly.source == 'https://api.open-meteo.com/v1/forecast'

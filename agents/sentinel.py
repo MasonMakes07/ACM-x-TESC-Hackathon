@@ -13,6 +13,7 @@ from datetime import date, timedelta
 from typing import Literal
 
 from agents.context import AnomalyContext, PACIFIC_INDEX_REGIONS, PERU_LOCATIONS
+from agents.context import is_live_weather
 from agents.runner import ProgressCallback, emit
 from agents.toolbox import AgentToolbox
 from schemas.anomaly import AnomalyRecord
@@ -181,7 +182,11 @@ def monitor(
     on_progress: ProgressCallback,
 ) -> SentinelReport:
     emit(on_progress, AGENT_NAME, "Re-checking the signal against source data.")
-    if anomaly.region in PACIFIC_INDEX_REGIONS:
+    if is_live_weather(anomaly):
+        result = json.loads(toolbox.execute('get_current_weather', {'latitude':context.latitude,'longitude':context.longitude}))
+        actual = result.get('current',{}).get('temperature_2m')
+        report = _compare(actual,anomaly,'Current model temperature') if result.get('status') == 'ok' and actual is not None else _unverified('Fresh current weather was unavailable.')
+    elif anomaly.region in PACIFIC_INDEX_REGIONS:
         report = _check_sst_index(toolbox, anomaly)
     elif anomaly.region in PERU_LOCATIONS:
         report = _check_peru_rainfall(toolbox, anomaly)

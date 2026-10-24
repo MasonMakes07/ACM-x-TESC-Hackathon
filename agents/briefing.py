@@ -12,7 +12,7 @@ from agents.agent_models import (
     InvestigationReport,
     VerificationReport,
 )
-from agents.context import AnomalyContext
+from agents.context import AnomalyContext, is_live_weather
 from agents.ledger import EvidenceLedger
 from agents.provenance import (
     completeness_cap,
@@ -188,7 +188,8 @@ def build_assessment(
                 if expects_official_report and not ledger.has_official_report()
                 else []
             ),
-            *([] if expects_official_report else [SINGLE_SOURCE_LIMITATION]),
+            *([] if expects_official_report or is_live_weather(anomaly) else [SINGLE_SOURCE_LIMITATION]),
+            *(['Current model estimates and station readings have different coverage and timestamps; this is not a historical anomaly assessment.'] if is_live_weather(anomaly) else []),
             *_sentinel_limitations(sentinel),
             *(
                 [FEW_ALTERNATIVES_LIMITATION]

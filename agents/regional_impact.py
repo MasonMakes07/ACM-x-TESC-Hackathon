@@ -7,7 +7,7 @@ and Tumbes; worldwide records only for their own grid-cell location.
 import json
 
 from agents.agent_models import ImpactReport, InvestigationReport
-from agents.context import AnomalyContext, build_context
+from agents.context import AnomalyContext, build_context, is_live_weather
 from agents.prompts import LOCAL_IMPACT_PROMPT, REGIONAL_IMPACT_PROMPT
 from agents.runner import ChatClient, ProgressCallback, emit, run_agent
 from agents.toolbox import AgentToolbox
@@ -47,6 +47,8 @@ def assess_regional_impact(
     context: AnomalyContext | None = None,
 ) -> ImpactReport:
     context = context or build_context(anomaly)
+    from agents.prompts import LIVE_IMPACT_PROMPT
+    live = is_live_weather(anomaly)
     emit(on_progress, AGENT_NAME, _progress_message(context))
     user_prompt = (
         f"As-of date: {toolbox.as_of_date.isoformat()}\n"
@@ -58,10 +60,10 @@ def assess_regional_impact(
     return run_agent(
         client,
         agent_name=AGENT_NAME,
-        system_prompt=PROMPT_BY_PROFILE[context.profile],
+        system_prompt=LIVE_IMPACT_PROMPT if live else PROMPT_BY_PROFILE[context.profile],
         user_prompt=user_prompt,
         output_model=ImpactReport,
         on_progress=on_progress,
         toolbox=toolbox,
-        tool_names=TOOLS_BY_PROFILE[context.profile],
+        tool_names=('get_current_weather',) if live else TOOLS_BY_PROFILE[context.profile],
     )

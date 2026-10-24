@@ -83,6 +83,7 @@ def _append_note(existing: str | None, note: str) -> str:
 
 # Builds the measured evidence item for the anomaly straight from the record.
 def observation_evidence(anomaly: AnomalyRecord) -> EvidenceItem:
+    from agents.context import is_live_weather
     return EvidenceItem(
         claim=(
             f"{anomaly.variable} in {anomaly.region} was {anomaly.value} "
@@ -91,7 +92,8 @@ def observation_evidence(anomaly: AnomalyRecord) -> EvidenceItem:
         ),
         source=anomaly.source,
         source_date=anomaly.observation_date,
-        evidence_type="measured",
+        evidence_type="reported" if is_live_weather(anomaly) else "measured",
+        limitations='Current weather-model estimate, not a station observation.' if is_live_weather(anomaly) else None,
     )
 
 

@@ -1,5 +1,68 @@
 # Worldwide data API
 
+## Today's live weather
+
+```python
+from data.live_weather import get_live_weather
+from data.locations import Location
+
+weather = get_live_weather(Location('San Diego', 32.7336, -117.1831), refresh=True)
+# .current, .current_time, .retrieved_at, .timezone, .hourly, .interval_seconds
+```
+
+Live data come from `https://api.open-meteo.com/v1/forecast`, using current and
+hourly fields for the selected coordinates. Current temperature/apparent temperature
+are in degC, relative humidity in %, wind in km/h, and precipitation in mm over
+the response's current interval (usually 15 minutes). Hourly precipitation covers
+the preceding hour. Current conditions are model estimates; future hourly values
+are forecasts. This API is not the delayed historical ERA5 archive and does not
+provide station-observed ground truth.
+
+Requests use Unix timestamps converted to the returned IANA timezone, including
+daylight-saving transitions. Only the selected location's local today is returned.
+Current timestamps must be from today, no more than 90 minutes old or 15 minutes
+ahead. Retrieval timestamps must be within ten minutes. Missing values remain
+unavailable; malformed units/ranges, duplicate times, and empty current data fail.
+There is a five-minute cache; `refresh=True` bypasses it. Network failures never
+use an expired response for live weather. The dashboard refreshes every five
+minutes while active, supports manual refresh, and exports current/hourly CSVs.
+Changing location hides old conditions. An error clears displayed conditions.
+
+The translator entry point is `load_live_weather(location, refresh=False)`.
+The **Live weather** view is the default; **Climate history** retains the
+existing monthly baseline calculations. Today's estimates and partial-day forecasts
+are not inserted into complete-month ERA5 anomaly calculations.
+
+Source definitions: https://open-meteo.com/en/docs
+
+### Independent station checks and live bots
+
+`translator.load_station_weather(location, refresh=False)` uses the NOAA NWS
+points/stations APIs to find a station within 50 km with a temperature reading
+no older than 90 minutes. Temperatures are validated in Celsius; wind and rain
+units are converted explicitly. Missing precipitation remains unknown, not zero.
+`compare_station(weather, station)` only compares temperatures from the same local
+day and no more than 60 minutes apart. Source timestamps and station distance
+remain visible; a difference over 3 degC gets a dashboard warning, not a claim
+that either source is necessarily wrong. NWS coverage is US-specific; other
+locations keep live model estimates and explicitly state station unavailability.
+
+`translator.investigate_live_weather(weather, station, on_progress)` builds a
+current-weather record, not a monthly anomaly, and runs the real Grok workflow.
+`agents.live_tools.LiveWeatherToolbox` binds `get_current_weather` to the selected
+coordinates and the same fresh snapshot as the dashboard. The Sentinel checks
+the value; Investigator and Impact get the live-only tool; Skeptic/Reviser check
+the draft. Wrong coordinates, expired data, and historical tool substitutions
+are rejected. The ledger records model estimates as references and NWS readings
+as measurements. Current conditions on the first day of a month are not expanded
+to the end of that month. The result's confidence describes the interpretation,
+not a station thermometer's accuracy. API failures show errors instead of sample
+reports. API keys remain local and are never included in tool results.
+
+NWS source definitions: https://www.weather.gov/documentation/services-web-api
+
+## Historical climate
+
 The worldwide scope supersedes the original Peru-only focus. The original
 `get_sst_series(region)` intentionally remains restricted to NOAA's actual index
 regions; those indices cannot describe arbitrary countries. Worldwide monitoring
@@ -54,9 +117,9 @@ only the requested observation year; baseline statistics are in the monthly expo
 `translator.search_world_locations`, `load_location_climate`, and
 `investigate_location` connect this to the dashboard. Investigation looks up the
 record only inside the selected location/year result. The existing agent workflow
-receives that record. While it is a stub, global results use real deterministic
-statistics and clearly state that limitation; they never reuse the Peru sample
-assessment. Changing location/year hides previous results and assessments.
+receives that record. The Grok workflow uses real controlled tools and validates
+structured evidence; it requires configured xAI credentials and credits. Changing
+location/year hides previous results and assessments.
 
 Country selection narrows place search; it does not imply national aggregation.
 Geocoding is an index and cannot list every unnamed point, so coordinate selection

@@ -42,6 +42,11 @@ def render_global_explorer(render_assessment):
         except ValueError as error:
             st.error(str(error))
         st.caption('Coordinates support remote places, islands, oceans, and locations absent from search. Latitude: south negative. Longitude: west negative.')
+    view = st.radio('Data view', ['Live weather', 'Climate history'], horizontal=True)
+    if view == 'Live weather':
+        from dashboard.live_weather import render_live_weather
+        render_live_weather(selected)
+        return
     year = int(st.number_input('Observation year', min_value=1960, max_value=date.today().year, value=date.today().year, step=1))
     st.caption('Monthly temperature and precipitation are compared with the preceding 30 years (at least 20 valid years per calendar month). The current year includes published observations with a seven-day buffer; incomplete months remain unknown.')
     identity = (selected, year)

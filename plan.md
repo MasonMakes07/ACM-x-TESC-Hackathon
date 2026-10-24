@@ -1,4 +1,15 @@
 WORLDWIDE SCOPE UPDATE - 2026-10-24
+Live data update: Worldwide monitoring now defaults to today's weather through
+the Open-Meteo current/hourly API. Current model estimates and future forecasts
+are labelled, timestamped in local time, and refreshed every five minutes.
+Expired live data are not used on network failure. Climate history remains a
+separate ERA5 baseline view; today's partial data do not become monthly anomalies.
+Live Grok investigations now use the displayed current snapshot and a live-only
+tool bound to the selected coordinates. US locations also get nearby NOAA NWS
+station observations when fresh data are available, with timestamps, distance,
+and explicit model/station comparison. Grok requires configured API credentials
+and credits; failures do not return a fake or historical substitute.
+
 The product now supports locations worldwide. The original Peru-focused proposal
 below is retained as historical project context and a replay case study. Its
 geographic restrictions are superseded by the following requirements:
@@ -8,8 +19,8 @@ geographic restrictions are superseded by the following requirements:
   source/coordinate provenance, and a location-specific historical baseline.
 - Show location maps, charts, monthly anomalies, and downloadable observations.
 - Pass the selected location's measurements into investigations. Never substitute
-  Peru sample claims for another location. Clearly label statistical fallback
-  while the Grok workflow remains unimplemented.
+  Peru sample claims for another location. Keep source provenance, timing and
+  uncertainty explicit throughout the implemented Grok workflow.
 - Preserve Pacific NOAA indices and the 2017 Peru replay as optional specialist
   data, without implying they measure local ocean conditions everywhere.
 - Country selection is a place-search filter; results represent the selected

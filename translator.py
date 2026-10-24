@@ -152,6 +152,65 @@ def load_location_climate(location, year):
         raise TranslatorError('Could not load climate data for this location. Check the dates and try again.') from error
 
 
+def load_live_weather(location, *, refresh=False):
+    from data.live_weather import get_live_weather
+    try:
+        return get_live_weather(location, refresh=refresh)
+    except Exception as error:
+        logger.exception('Live weather retrieval failed')
+        raise TranslatorError(
+            "Today's weather is unavailable or out of date. Try refreshing in a moment."
+        ) from error
+
+
+def load_station_weather(location, *, refresh=False):
+    from data.station_weather import get_station_observation
+    return get_station_observation(location,refresh=refresh)
+
+
+def live_weather_record(weather):
+    temperature = weather.current['temperature_2m']
+    if temperature is None:
+        raise TranslatorError('Current temperature is unavailable; refresh the live data.')
+    loc = weather.location
+    return AnomalyRecord(
+        anomaly_id=f'live_{loc.key}_{weather.current_time:%Y%m%d%H%M}',
+        variable='Current air temperature',
+        region=f'{loc.label} ({loc.latitude:.6f}, {loc.longitude:.6f})',
+        observation_date=weather.current_time.date(), value=temperature, unit='degC',
+        baseline_period='Not applicable: current weather, not a climate anomaly',
+        source=weather.source, status='monitoring',
+        detection_method=f'Current model estimate at {weather.current_time.isoformat()}; no climate anomaly or hazard threshold evaluated',
+    )
+
+
+def investigate_live_weather(weather, station, on_progress):
+    from agents.live_tools import LiveWeatherToolbox
+    from agents.ledger import EvidenceLedger
+    from schemas.assessment import EvidenceItem
+    anomaly = live_weather_record(weather)
+    toolbox = LiveWeatherToolbox(EvidenceLedger(),anomaly.observation_date,weather.location,weather=weather,station=station)
+    try:
+        result = workflow.run_investigation(anomaly,on_progress,toolbox=toolbox)
+        result = _validate(Assessment,result,'Live weather assessment')
+        if result.anomaly_id != anomaly.anomaly_id:
+            raise TranslatorError('Assessment returned for the wrong current weather snapshot.')
+        if station.get('status') == 'ok':
+            observed = datetime.fromisoformat(station['observed_at'])
+            measured = EvidenceItem(
+                claim=f"{station['name']} ({station['station']}) observed {station['temperature_degC']:g} degC at {station['observed_at']}; station distance {station['distance_km']:g} km.",
+                source='NOAA NWS '+station['station'],url=station['source'],source_date=observed.astimezone(weather.current_time.tzinfo).date(),
+                evidence_type='measured',limitations='Station reading describes this station, not every part of the city.',
+            )
+            result = result.model_copy(update={'evidence':[*result.evidence,measured]})
+        return result
+    except TranslatorError:
+        raise
+    except Exception as error:
+        logger.error('Live Grok investigation failed: %s',type(error).__name__)
+        raise TranslatorError('The live Grok investigation failed. Check the API settings and credits, then retry.') from error
+
+
 def investigate_location(climate, anomaly_id, on_progress):
     """Investigate only records from the selected location, never Peru sample data."""
     from schemas.assessment import EvidenceItem

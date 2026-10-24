@@ -16,7 +16,7 @@ from agents.action import act
 from agents.agent_errors import AgentOutputError, GrokError
 from agents.agent_models import ActionReport
 from agents.briefing import alert_ceiling, build_assessment, final_confidence
-from agents.context import build_context, infer_as_of_date
+from agents.context import build_context, infer_as_of_date, is_live_weather
 from agents.grok_client import GrokClient
 from agents.investigator import investigate
 from agents.ledger import EvidenceLedger, LedgerSource
@@ -47,6 +47,13 @@ def run_investigation(
     toolbox: AgentToolbox | None = None,
 ) -> Assessment:
     client = client or GrokClient()
+    if toolbox is None and is_live_weather(anomaly):
+        from agents.live_tools import LiveWeatherToolbox
+        from data.locations import Location
+        selected = build_context(anomaly)
+        if selected.latitude is None:
+            raise ValueError('Live investigations require selected coordinates')
+        toolbox = LiveWeatherToolbox(EvidenceLedger(),infer_as_of_date(anomaly),Location(selected.place,selected.latitude,selected.longitude))
     toolbox = toolbox or AgentToolbox(EvidenceLedger(), infer_as_of_date(anomaly))
     ledger = toolbox.ledger
     context = build_context(anomaly)
