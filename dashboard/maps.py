@@ -1,73 +1,87 @@
-"""Map of the monitored Pacific region and Peru locations (Tier 2 feature).
+"""Map of monitored Pacific SST regions and northern Peru locations.
 
 Owner: Person 3 (Product & Dashboard).
 """
 
 import plotly.graph_objects as go
 
-from dashboard.charts import apply_dark_layout
-
-# Region name -> (lat_min, lat_max, lon_min, lon_max), using NOAA's index boxes.
 REGION_BOXES: dict[str, tuple[float, float, float, float]] = {
     "Nino 1+2": (-10, 0, -90, -80),
     "Nino 3.4": (-5, 5, -170, -120),
 }
-# Northern Peru locations -> (lat, lon).
+
 PERU_LOCATIONS: dict[str, tuple[float, float]] = {
-    "Tumbes": (-3.57, -80.45),
-    "Piura": (-5.19, -80.63),
-    "Chiclayo": (-6.77, -79.84),
-    "Trujillo": (-8.11, -79.03),
+    "Piura": (-5.1945, -80.6328),
+    "Tumbes": (-3.5669, -80.4515),
+    "Chiclayo": (-6.7714, -79.8409),
+    "Trujillo": (-8.1116, -79.0287),
 }
-SELECTED_COLOR = "#FF6B6B"
-DIM_COLOR = "#5C6B80"
-LOCATION_COLOR = "#70E1BB"
 
 
-# Draws one region box as a closed outline, filled and bright when selected.
-def _region_trace(name: str, box: tuple[float, float, float, float], selected: bool) -> go.Scattergeo:
+# Returns a closed longitude-latitude outline for one monitored region.
+def _box_outline(box: tuple[float, float, float, float]) -> tuple[list[float], list[float]]:
     lat_min, lat_max, lon_min, lon_max = box
-    color = SELECTED_COLOR if selected else DIM_COLOR
-    return go.Scattergeo(
-        lat=[lat_min, lat_min, lat_max, lat_max, lat_min],
-        lon=[lon_min, lon_max, lon_max, lon_min, lon_min],
-        mode="lines", name=name,
-        line={"color": color, "width": 3 if selected else 1.5},
-        fill="toself" if selected else "none",
-        fillcolor="rgba(255,107,107,0.25)",
-        hoverinfo="name",
+    return (
+        [lon_min, lon_max, lon_max, lon_min, lon_min],
+        [lat_min, lat_min, lat_max, lat_max, lat_min],
     )
 
 
-# Draws the northern Peru locations as labelled markers.
-def _locations_trace() -> go.Scattergeo:
-    names = list(PERU_LOCATIONS)
-    return go.Scattergeo(
-        lat=[PERU_LOCATIONS[name][0] for name in names],
-        lon=[PERU_LOCATIONS[name][1] for name in names],
-        text=names, mode="markers+text", textposition="middle right",
-        name="Northern Peru", marker={"size": 8, "color": LOCATION_COLOR},
-        textfont={"color": LOCATION_COLOR},
-    )
-
-
-# Builds a map of the monitored Pacific boxes with the selected region highlighted.
+# Draws Pacific monitoring regions and labelled northern Peru cities.
 def region_map(selected_region: str | None = None) -> go.Figure:
-    figure = go.Figure(
-        [_region_trace(name, box, name == selected_region) for name, box in REGION_BOXES.items()]
+    figure = go.Figure()
+    for name, box in REGION_BOXES.items():
+        lon, lat = _box_outline(box)
+        selected = name == selected_region
+        figure.add_trace(
+            go.Scattergeo(
+                lon=lon,
+                lat=lat,
+                mode="lines",
+                name=name,
+                fill="toself" if selected else "none",
+                fillcolor="rgba(64,202,221,0.24)" if selected else "rgba(0,0,0,0)",
+                line={
+                    "color": "#55D8E9" if selected else "#526779",
+                    "width": 3 if selected else 1.5,
+                },
+                hovertemplate=f"{name}<extra></extra>",
+            )
+        )
+
+    figure.add_trace(
+        go.Scattergeo(
+            lon=[coordinate[1] for coordinate in PERU_LOCATIONS.values()],
+            lat=[coordinate[0] for coordinate in PERU_LOCATIONS.values()],
+            text=list(PERU_LOCATIONS),
+            mode="markers+text",
+            name="Northern Peru",
+            textposition="middle right",
+            textfont={"color": "#F8FAFC", "size": 11},
+            marker={"color": "#FFC46B", "size": 8, "line": {"color": "#0F172A", "width": 1}},
+            hovertemplate="%{text}<br>%{lat:.2f}°, %{lon:.2f}°<extra></extra>",
+        )
     )
-    figure.add_trace(_locations_trace())
     figure.update_geos(
-        projection_type="natural earth",
-        lataxis_range=[-20, 15], lonaxis_range=[-180, -65],
-        showland=True, landcolor="#1E2B3C",
-        showocean=True, oceancolor="#0E1A2A",
-        showcountries=True, countrycolor="#3A4A60",
-        showcoastlines=True, coastlinecolor="#4A5C74",
+        projection_type="mercator",
+        center={"lat": -2, "lon": -122},
+        lataxis_range=[-20, 16],
+        lonaxis_range=[-178, -68],
+        showland=True,
+        landcolor="#263746",
+        showocean=True,
+        oceancolor="#0C2434",
+        showcoastlines=True,
+        coastlinecolor="#7C92A3",
+        showlakes=False,
         bgcolor="rgba(0,0,0,0)",
     )
     figure.update_layout(
-        title="Monitored regions", showlegend=True,
-        legend={"orientation": "h", "y": -0.05},
+        template="plotly_dark",
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        margin={"l": 0, "r": 0, "t": 0, "b": 0},
+        showlegend=True,
+        legend={"orientation": "h", "y": 0, "x": 0},
     )
-    return apply_dark_layout(figure)
+    return figure

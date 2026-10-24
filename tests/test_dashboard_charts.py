@@ -1,98 +1,119 @@
-"""Chart and map checks. Owner: Person 3 (Product & Dashboard)."""
+"""Offline checks for the dashboard's chart and geographic views."""
 
 from datetime import date
 
 import pandas as pd
 import pytest
 
-from dashboard.charts import EMPTY_MESSAGE, observation_chart
+from dashboard.charts import observation_chart
 from dashboard.maps import PERU_LOCATIONS, REGION_BOXES, region_map
 from schemas.anomaly import AnomalyRecord
 
 
-# A small monthly series spanning the sample anomaly date.
-@pytest.fixture
-def series():
+# Creates a small dated series with a gap for chart tests.
+def _series() -> pd.DataFrame:
     return pd.DataFrame(
         {
-            "date": pd.to_datetime(["2023-04-01", "2023-05-01", "2023-06-01", "2023-07-01"]),
-            "value": [0.5, 1.4, 2.8, float("nan")],
+            "date": pd.to_datetime(["2023-01-01", "2023-02-01", "2023-03-01"]),
+            "value": [0.5, float("nan"), 2.0],
         }
     )
 
 
-# An anomaly record dated inside the fixture series.
-@pytest.fixture
-def anomaly():
+# Creates an anomaly record for the final series observation.
+def _anomaly() -> AnomalyRecord:
     return AnomalyRecord(
-        anomaly_id="test_001", variable="sea_surface_temperature_anomaly",
-        region="Nino 1+2", observation_date=date(2023, 6, 1), value=2.8, unit="degC",
-        baseline_period="1991-2020", source="Test source",
-        detection_method="published_anomaly_index", status="detected",
+        anomaly_id="nino12_202303",
+        variable="sea_surface_temperature_anomaly",
+        region="Nino 1+2",
+        observation_date=date(2023, 3, 1),
+        value=2.0,
+        unit="degC",
+        baseline_period="1991-2020",
+        source="NOAA CPC",
+        detection_method="published_anomaly_index",
+        status="detected",
     )
 
 
-# Returns the trace named "Detected anomaly" if the figure has one.
-def _anomaly_traces(figure):
-    return [trace for trace in figure.data if trace.name == "Detected anomaly"]
-
-
-# Checks the original three-argument call still works.
-def test_backward_compatible_call(series):
-    figure = observation_chart(series, "SST", "degC")
+# Keeps the existing three-argument chart call usable.
+def test_observation_chart_backward_compatible() -> None:
+    figure = observation_chart(_series(), "SST anomalies", "degC")
     assert len(figure.data) == 1
-    assert figure.layout.title.text == "SST"
+    assert figure.data[0].y[0] == 0.5
+    assert pd.isna(figure.data[0].y[1])
+    assert figure.data[0].y[2] == 2.0
+    assert figure.layout.paper_bgcolor == "rgba(0,0,0,0)"
+    assert figure.layout.plot_bgcolor == "rgba(0,0,0,0)"
 
 
-# Checks replay_until drops observations after the replay date.
-def test_replay_until_removes_later_points(series):
-    figure = observation_chart(series, "SST", "degC", replay_until=date(2023, 5, 1))
+# Removes all dates later than the replay cutoff.
+def test_observation_chart_replay_until() -> None:
+    figure = observation_chart(_series(), "SST", "degC", replay_until=date(2023, 2, 1))
     assert len(figure.data[0].x) == 2
+    assert max(pd.Timestamp(value).date() for value in figure.data[0].x) == date(2023, 2, 1)
 
 
-# Checks the anomaly marker and its source hover appear when the date is plotted.
-def test_anomaly_marker_in_range(series, anomaly):
-    figure = observation_chart(series, "SST", "degC", anomaly=anomaly)
-    markers = _anomaly_traces(figure)
-    assert len(markers) == 1
-    assert "Source: Test source" in markers[0].hovertemplate
-    assert "Source: Test source" in figure.data[0].hovertemplate
+# Highlights a selected anomaly only when its observation is visible.
+def test_observation_chart_anomaly_marker_in_and_out_of_range() -> None:
+    anomaly = _anomaly()
+    visible = observation_chart(_series(), "SST", "degC", anomaly=anomaly)
+    assert [trace.name for trace in visible.data] == ["Observations", "Detected anomaly"]
+    assert list(visible.data[1].y) == [anomaly.value]
+    assert "2.00 degC" in visible.layout.annotations[-1].text
+    assert "Source: NOAA CPC" in visible.data[0].hovertemplate
 
-
-# Checks the anomaly marker is skipped when replay hides its date.
-def test_anomaly_marker_out_of_range(series, anomaly):
-    figure = observation_chart(
-        series, "SST", "degC", anomaly=anomaly, replay_until=date(2023, 5, 1)
+    hidden = observation_chart(
+        _series(), "SST", "degC", anomaly=anomaly, replay_until=date(2023, 2, 1)
     )
-    assert not _anomaly_traces(figure)
+    assert [trace.name for trace in hidden.data] == ["Observations"]
 
 
-# Checks a threshold adds exactly two extra horizontal lines.
-def test_threshold_adds_two_lines(series):
-    without = observation_chart(series, "SST", "degC")
-    with_threshold = observation_chart(series, "SST", "degC", threshold=1.0)
-    assert len(with_threshold.layout.shapes) - len(without.layout.shapes) == 2
+# Avoids marking a date with no underlying observation.
+def test_observation_chart_skips_anomaly_without_observation() -> None:
+    gap = _series().loc[[0, 2]].copy()
+    anomaly = _anomaly().model_copy(update={"observation_date": date(2023, 2, 1)})
+    figure = observation_chart(gap, "SST", "degC", anomaly=anomaly)
+    assert [trace.name for trace in figure.data] == ["Observations"]
 
 
-# Checks empty input, and replay before the first point, give the empty-state message.
-@pytest.mark.parametrize("replay_until", [None, date(2000, 1, 1)])
-def test_empty_series_shows_message(series, replay_until):
-    source = series if replay_until else series.iloc[0:0]
-    figure = observation_chart(source, "SST", "degC", replay_until=replay_until)
-    assert figure.layout.annotations[0].text == EMPTY_MESSAGE
+# Adds positive and negative threshold guides with labels.
+def test_observation_chart_threshold() -> None:
+    figure = observation_chart(_series(), "SST", "degC", threshold=1.5)
+    assert {shape.y0 for shape in figure.layout.shapes} == {0, 1.5, -1.5}
+    assert any("+1.5 degC" in item.text for item in figure.layout.annotations)
+    assert any("−1.5 degC" in item.text for item in figure.layout.annotations)
 
 
-# Checks the selected region is the only filled box and every location is labelled.
-def test_region_map_highlights_selected():
+# Explains empty and pre-observation replay periods without raising.
+def test_observation_chart_empty_period() -> None:
+    empty = pd.DataFrame({"date": pd.to_datetime([]), "value": pd.Series(dtype=float)})
+    missing = pd.DataFrame({"date": pd.to_datetime(["2023-01-01"]), "value": [float("nan")]})
+    for series, replay_until in (
+        (empty, None),
+        (missing, None),
+        (_series(), date(2022, 12, 1)),
+    ):
+        figure = observation_chart(series, "SST", "degC", replay_until=replay_until)
+        assert not figure.data
+        assert figure.layout.annotations[0].text == "No observations in this period"
+        assert figure.layout.annotations[0].xref == "paper"
+
+
+# Shows a closed highlighted region alongside all Peru place markers.
+def test_region_map_highlights_selected_region() -> None:
     figure = region_map("Nino 1+2")
-    fills = {trace.name: trace.fill for trace in figure.data if trace.name in REGION_BOXES}
-    assert fills == {"Nino 1+2": "toself", "Nino 3.4": "none"}
-    labels = [trace for trace in figure.data if trace.name == "Northern Peru"][0].text
-    assert list(labels) == list(PERU_LOCATIONS)
+    boxes = {trace.name: trace for trace in figure.data[:2]}
+    assert set(boxes) == set(REGION_BOXES)
+    assert boxes["Nino 1+2"].fill == "toself"
+    assert boxes["Nino 3.4"].fill == "none"
+    assert boxes["Nino 1+2"].lon[0] == boxes["Nino 1+2"].lon[-1]
+    assert boxes["Nino 1+2"].lat[0] == boxes["Nino 1+2"].lat[-1]
+    assert set(figure.data[-1].text) == set(PERU_LOCATIONS)
 
 
-# Checks an unknown or missing region draws every box dim without raising.
-@pytest.mark.parametrize("region", [None, "Atlantis"])
-def test_region_map_unknown_region(region):
+# Leaves all regions dim for a missing or unsupported selection.
+@pytest.mark.parametrize("region", [None, "unknown"])
+def test_region_map_unknown_region(region: str | None) -> None:
     figure = region_map(region)
-    assert all(trace.fill == "none" for trace in figure.data if trace.name in REGION_BOXES)
+    assert all(trace.fill == "none" for trace in figure.data[:2])
