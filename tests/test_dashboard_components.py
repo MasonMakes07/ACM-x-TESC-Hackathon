@@ -165,3 +165,47 @@ def test_status_uses_latest_regional_observation(records: tuple[list[AnomalyReco
     assert not app.exception
     assert app.metric[0].value == "Monitoring"
     assert "Observed 2023-07-01" in _visible_text(app)
+
+
+# Exercises the browser component through Streamlit without loading any remote services.
+def _render_globe(anomalies: "list[AnomalyRecord]", assessment: "Assessment") -> None:
+    from dashboard.components import climate_globe
+
+    climate_globe(anomalies, [assessment], is_sample=True)
+
+
+# Checks the globe exposes supplied records, motion controls, and keyboard region access.
+@pytest.mark.parametrize("legacy", [False, True])
+def test_globe_component_renders(
+    records: tuple[list[AnomalyRecord], Assessment], monkeypatch: pytest.MonkeyPatch, legacy: bool,
+) -> None:
+    import streamlit as st
+
+    if legacy:
+        monkeypatch.delattr(st, "iframe", raising=False)
+    anomalies, assessment = records
+    app = AppTest.from_function(_render_globe, args=(anomalies, assessment)).run()
+    assert not app.exception
+    document = app.get("iframe")[0].proto.srcdoc
+    assert 'id="region"' in document
+    assert 'id="rotate"' in document
+    assert 'prefers-reduced-motion' in document
+    assert '"isSample": true' in document
+    assert assessment.summary in document
+    assert 'earth_atmos_2048.jpg' in document
+
+
+# A hostile claim must stay JSON data instead of terminating its script container.
+def test_globe_payload_escapes_script_content(records: tuple[list[AnomalyRecord], Assessment]) -> None:
+    from dashboard.components import _globe_document
+
+    anomalies, assessment = records
+    hostile = '</script><script>alert("injected")</script>'
+    report = assessment.model_copy(update={"summary": hostile})
+    document = _globe_document(anomalies, [report], False)
+    payload = document.split('<script id="earthwatch-data" type="application/json">', 1)[1].split('</script>', 1)[0]
+    decoded = json.loads(payload)
+    assert decoded['assessments'][0]['summary'] == hostile
+    assert '<script>' not in payload
+    assert decoded['anomalies'][0]['anomaly_id'] == anomalies[0].anomaly_id
+    assert decoded['isSample'] is False
