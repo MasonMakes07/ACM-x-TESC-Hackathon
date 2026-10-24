@@ -1,6 +1,7 @@
 """Shared pytest fixtures. Owner: Person 3 (Product & Dashboard)."""
 
 import pytest
+import streamlit as st
 
 import translator
 
@@ -13,6 +14,7 @@ def _not_implemented(*args, **kwargs):
 # Forces every workstream into stub mode so tests never call real APIs.
 @pytest.fixture
 def stubbed_backend(monkeypatch):
+    st.cache_data.clear()
     monkeypatch.setattr(
         translator.anomaly_detection, "detect_anomalies", _not_implemented
     )

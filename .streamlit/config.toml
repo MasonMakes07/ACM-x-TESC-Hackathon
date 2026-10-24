@@ -1,0 +1,8 @@
+# Owner: Person 3 / Codex B. Keep Streamlit's native accessible controls.
+[theme]
+base = "dark"
+primaryColor = "#70E1BB"
+backgroundColor = "#0B1420"
+secondaryBackgroundColor = "#121F30"
+textColor = "#EDF3FA"
+font = "sans serif"
