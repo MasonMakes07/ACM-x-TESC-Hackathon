@@ -107,3 +107,30 @@ def test_region_map_shows_the_whole_world(region: str | None) -> None:
     assert tuple(geo.lataxis.range) == (-90, 90)
     assert tuple(geo.lonaxis.range) == (-180, 180)
     assert geo.showcountries
+
+
+# Missing dates and missing values cannot create a fabricated selected observation.
+def test_anomaly_marker_requires_a_real_observation(series: pd.DataFrame, anomaly: AnomalyRecord) -> None:
+    gap = series.loc[series['date'].dt.date != anomaly.observation_date]
+    assert not _anomaly_traces(observation_chart(gap, 'Climate event', 'degC', anomaly=anomaly))
+    empty = pd.DataFrame({'date': pd.to_datetime(['2023-06-01']), 'value': [float('nan')]})
+    assert observation_chart(empty, 'Climate event', 'degC').layout.annotations[0].text == EMPTY_MESSAGE
+    assert observation_chart(pd.DataFrame(), 'Climate event', 'degC').layout.annotations[0].text == EMPTY_MESSAGE
+
+
+# Historical replay includes observations throughout its selected calendar day.
+def test_replay_includes_intraday_observations() -> None:
+    series = pd.DataFrame({'date': pd.to_datetime(['2023-06-01T18:00:00Z', '2023-06-02T01:00:00Z']), 'value': [1, 2]})
+    figure = observation_chart(series, 'Rainfall', 'mm', replay_until=date(2023, 6, 1))
+    assert list(figure.data[0].y) == [1]
+
+
+# Comparisons separate event variables and units instead of applying one ENSO threshold globally.
+def test_comparison_separates_different_climate_variables(anomaly: AnomalyRecord) -> None:
+    from dashboard.charts import anomaly_comparison_chart
+
+    rain = anomaly.model_copy(update={'anomaly_id': 'rain', 'variable': 'precipitation_anomaly', 'unit': 'mm', 'value': 80})
+    figure = anomaly_comparison_chart([anomaly, rain])
+    assert len(figure.data) == 2
+    assert figure.data[0].yaxis != figure.data[1].yaxis
+    assert not figure.layout.shapes

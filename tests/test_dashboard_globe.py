@@ -73,3 +73,30 @@ def test_unplotted_regions_are_reported():
     anomalies = [_anomaly("Nino 1+2"), _anomaly("Mediterranean", anomaly_id="globe_003")]
     assert unplotted_regions(anomalies) == ["Mediterranean"]
     assert "Mediterranean" not in json.dumps(globe_data(anomalies, None))
+
+
+# Explicit severity determines ring color; an unassessed event never defaults to danger or benefit.
+@pytest.mark.parametrize('level,color', [('red', '#FF767C'), ('orange', '#FFB16A'), ('yellow', '#F6DB72'), ('green', '#79DFB5')])
+def test_globe_uses_explicit_severity(level: str, color: str) -> None:
+    record = _anomaly()
+    data = globe_data([record], None, severity_by_anomaly={record.anomaly_id: level})
+    assert data['rings'][0]['color'] == color
+    assert data['points'][0]['color'] == color
+    assert globe_data([record], None)['points'][0]['severity'] == 'unknown'
+
+
+# Country and city feeds can be mapped worldwide without a Niño-only registry.
+def test_globe_accepts_worldwide_coordinates() -> None:
+    record = _anomaly('Tokyo', variable='heatwave_temperature_anomaly')
+    data = globe_data([record], 'Tokyo', region_locations={'Tokyo': (35.68, 139.69)})
+    assert data['points'][0]['lat'] == 35.68
+    assert data['points'][0]['lng'] == 139.69
+    assert unplotted_regions([record], {'Tokyo': (35.68, 139.69)}) == []
+
+
+# Two distinct hazard types in the same region retain separate source IDs and click targets.
+def test_globe_keeps_multiple_hazard_types() -> None:
+    heat = _anomaly('Europe', variable='temperature_anomaly')
+    rain = _anomaly('Europe', anomaly_id='rain_001', variable='precipitation_anomaly', unit='mm')
+    data = globe_data([heat, rain], 'Europe')
+    assert {item['anomaly_id'] for item in data['points'] if item['anomaly_id']} == {'globe_001', 'rain_001'}

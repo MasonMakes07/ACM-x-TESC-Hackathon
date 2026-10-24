@@ -110,3 +110,41 @@ def test_event_panel_shows_sources_after_investigation():
     assert not app.exception
     assert any("SAMPLE sources" in item.value for item in app.warning)
     assert any("gave no link" in item.value for item in app.caption)
+
+
+# The guided demo restores empty filters and completes the existing backend workflow.
+def test_guided_demo_recovers_empty_filters_and_investigates():
+    app = pacific_app()
+    app.sidebar.multiselect(key='region_filter').set_value([]).run()
+    assert not app.exception
+    assert any('No events match' in item.value for item in app.info)
+    app.button(key='guided_demo').click().run()
+    assert not app.exception
+    assert app.session_state['results']
+    assert any('Sample mode' in item.label for item in app.tabs[2].expander)
+
+
+# Color previews are labeled and reach the real dashboard's event cards and briefing.
+def test_severity_preview_is_wired_into_the_current_app():
+    app = pacific_app()
+    app.selectbox(key='sample_severity').select('red').run()
+    assert not app.exception
+    assert any('sample preview' in item.value for item in app.warning)
+    assert any('Critical danger' in item.value for item in app.markdown)
+    app.button(key='run_investigation').click().run()
+    assert not app.exception
+    assert any('Critical danger' in item.value for item in app.tabs[3].markdown)
+
+
+# A heatwave event must not display an SST series under its temperature label.
+def test_non_sst_event_does_not_call_sst_source(stubbed_backend):
+    record = translator._load_sample_anomalies()[0].model_copy(update={
+        'region': 'Europe', 'variable': 'heatwave_temperature_anomaly',
+    })
+    stubbed_backend.setattr(translator.anomaly_detection, 'detect_anomalies', lambda: [record])
+    calls = []
+    stubbed_backend.setattr(translator.climate_sources, 'get_sst_series', lambda region: calls.append(region))
+    app = pacific_app()
+    assert not app.exception
+    assert calls == []
+    assert any('Europe' in item.value for item in app.subheader)

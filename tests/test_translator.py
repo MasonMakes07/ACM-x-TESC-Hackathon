@@ -143,3 +143,27 @@ def test_investigate_rejects_bad_workflow_output(stubbed_backend, fake_workflow)
     stubbed_backend.setattr(translator.workflow, "run_investigation", fake_workflow)
     with pytest.raises(TranslatorError):
         translator.investigate_anomaly(SAMPLE_ID, lambda event: None)
+
+
+# Worldwide region names reach the climate source when real observations are available.
+@pytest.mark.parametrize('region', ['Indian Ocean', 'Mediterranean', 'São Paulo'])
+def test_load_series_accepts_worldwide_regions(stubbed_backend, region):
+    calls = []
+    series = pd.DataFrame({'date': ['2023-06-01'], 'value': [1.2]})
+
+    # Records which global region was requested without making any API call.
+    def source(selected_region):
+        calls.append(selected_region)
+        return series
+
+    stubbed_backend.setattr(translator.climate_sources, 'get_sst_series', source)
+    result, is_sample = translator.load_observation_series(region)
+    assert calls == [region]
+    assert not is_sample
+    assert result['value'].iloc[0] == 1.2
+
+
+# Sample Pacific measurements must not be silently reused for another part of the world.
+def test_unbuilt_global_source_does_not_relabel_pacific_sample():
+    with pytest.raises(TranslatorError, match='No observations have been supplied'):
+        translator.load_observation_series('Indian Ocean')
