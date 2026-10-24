@@ -1,0 +1,26 @@
+[
+  {
+    "anomaly_id": "sample_nino12_001",
+    "variable": "sea_surface_temperature_anomaly",
+    "region": "Nino 1+2",
+    "observation_date": "2023-06-01",
+    "value": 2.8,
+    "unit": "degC",
+    "baseline_period": "1991-2020",
+    "source": "SAMPLE DATA - not a real measurement",
+    "detection_method": "published_anomaly_index",
+    "status": "detected"
+  },
+  {
+    "anomaly_id": "sample_nino34_001",
+    "variable": "sea_surface_temperature_anomaly",
+    "region": "Nino 3.4",
+    "observation_date": "2023-06-01",
+    "value": 1.1,
+    "unit": "degC",
+    "baseline_period": "1991-2020",
+    "source": "SAMPLE DATA - not a real measurement",
+    "detection_method": "published_anomaly_index",
+    "status": "monitoring"
+  }
+]

@@ -1,0 +1,20 @@
+{
+  "anomaly_id": "sample_nino12_001",
+  "summary": "SAMPLE ASSESSMENT - placeholder until the agent workflow is implemented.",
+  "evidence": [
+    {
+      "claim": "SAMPLE: the anomaly index exceeds the investigation threshold.",
+      "source": "SAMPLE DATA - not a real source",
+      "source_date": "2023-06-01",
+      "evidence_type": "measured",
+      "limitations": "Illustrative only.",
+      "url": null
+    }
+  ],
+  "supporting_findings": ["SAMPLE supporting finding."],
+  "contradictory_findings": ["SAMPLE contradictory finding."],
+  "regional_implications": ["SAMPLE regional implication for Piura."],
+  "confidence": "inconclusive",
+  "limitations": ["This is sample data, not an investigation result."],
+  "recommended_next_steps": ["Implement agents/workflow.py run_investigation()."]
+}

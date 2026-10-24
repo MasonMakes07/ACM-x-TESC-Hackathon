@@ -1,2 +1,13 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Force LF line endings in the repo for source and data files so Windows and
+# macOS teammates never create whole-file line-ending diffs (merge conflicts).
+*.py    text eol=lf
+*.md    text eol=lf
+*.json  text eol=lf
+*.csv   text eol=lf
+*.txt   text eol=lf
+*.ini   text eol=lf
+*.yml   text eol=lf
+*.toml  text eol=lf

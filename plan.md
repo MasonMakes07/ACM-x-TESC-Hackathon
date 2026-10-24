@@ -1,3 +1,5 @@
+READ FIRST: The repository skeleton already exists. Before writing code, read section 18 (Working in parallel without breaking each other) and README.md.
+
 1. Define exactly what EarthWatch will do
 The product in one sentence
 EarthWatch is an AI-powered climate intelligence platform that detects unusual environmental conditions, investigates the evidence using multiple sources, and translates those findings into understandable regional risk assessments.
@@ -910,45 +912,63 @@ Streamlit + Python + pandas + Plotly + Grok API.
 
 You can build the backend as ordinary Python modules first and add FastAPI only if you need a separate service.
 
-A possible repository structure:
-earthwatch/
+The actual repository structure (already created; owner in brackets):
+ACM x TESC Hackathon/
 │
-├── app.py
+├── app.py                      [P3] Streamlit entry point; calls translator.py only
+├── translator.py               [P3] Only bridge between dashboard and backend
+├── config.py                   [P3] Reads .env; the only place secrets are loaded
 │
-├── data/
-│   ├── climate_sources.py
+├── data/                       [P1]
+│   ├── climate_sources.py      get_sst_series(region) -> DataFrame(date, value)
 │   ├── rainfall_sources.py
 │   └── cache.py
 │
-├── analysis/
-│   ├── anomaly_detection.py
+├── analysis/                   [P1]
+│   ├── anomaly_detection.py    detect_anomalies() -> list[AnomalyRecord]
 │   ├── rainfall_analysis.py
 │   └── validation.py
 │
-├── agents/
+├── agents/                     [P2]
+│   ├── workflow.py             run_investigation(anomaly, on_progress) -> Assessment
 │   ├── investigator.py
 │   ├── regional_impact.py
 │   ├── skeptic.py
 │   └── briefing.py
 │
-├── dashboard/
+├── dashboard/                  [P3]
 │   ├── charts.py
 │   ├── maps.py
 │   └── components.py
 │
-├── schemas/
-│   ├── anomaly.py
-│   └── assessment.py
+├── schemas/                    [TEAM] Shared contracts; change only by agreement
+│   ├── anomaly.py              AnomalyRecord, SERIES_COLUMNS
+│   ├── assessment.py           Assessment, EvidenceItem, ProgressEvent
+│   └── errors.py               TranslatorError
+│
+├── sample_data/                [TEAM] Labelled fake data used until stubs are built
+│   ├── anomalies.json
+│   ├── assessment.json
+│   └── sst_series.csv
 │
 ├── tests/
-│   ├── test_anomalies.py
-│   └── test_agents.py
+│   ├── conftest.py             [P3] stubbed_backend fixture
+│   ├── test_contracts.py       [TEAM] sample data must match schemas
+│   ├── test_translator.py      [P3]
+│   ├── test_app.py             [P3] app renders and investigates without crashing
+│   ├── test_anomalies.py       [P1]
+│   └── test_agents.py          [P2]
 │
-├── requirements.txt
+├── .github/
+│   ├── workflows/tests.yml     CI: runs pytest on every push and pull request
+│   └── pull_request_template.md
+│
+├── requirements.txt            [TEAM]
+├── pytest.ini
 ├── .env.example
 └── README.md
 
-Person 1 primarily owns data/ and analysis/. Person 2 owns agents/ and collaborates on schemas/. Person 3 owns app.py and dashboard/, coordinating integration with both teammates.
+Person 1 owns data/ and analysis/. Person 2 owns agents/. Person 3 owns app.py, translator.py, config.py and dashboard/, coordinating integration with both teammates. schemas/, sample_data/ and requirements.txt belong to the whole team.
 
 Keep API keys in environment variables or your deployment platform's secrets manager. Never commit them to GitHub.
 15. Your first 60 minutes: Exactly what to do
@@ -961,9 +981,9 @@ As a team, write down:
 - Demo scenario: A historical Pacific climate event.
 - Minimum success condition: A complete investigation using real observations and an actual Grok-powered workflow.
 Minutes 15–30: Set up the repository and interfaces
-Person 3 creates the repository and application skeleton.
+The repository and application skeleton already exist. Everyone clones it, follows the README setup, runs `streamlit run app.py` and `pytest`, and creates their own branch (section 18).
 
-All three agree on the anomaly and assessment schemas.
+All three review schemas/anomaly.py and schemas/assessment.py together and agree on any changes now. This is the cheapest moment to change the contract.
 
 Person 1 selects the first NOAA dataset and verifies that it can be retrieved and parsed.
 
@@ -1036,6 +1056,7 @@ Everyone
 - [ ] No invented measurements or citations.
 - [ ] Missing evidence is clearly identified.
 - [ ] API keys are secured.
+- [ ] CI (pytest) is green on main and no SAMPLE DATA banners appear in the demo.
 - [ ] The product is demonstrably more than a chatbot.
 - [ ] Each team member can explain their contribution.
 My final recommendation
@@ -1048,3 +1069,78 @@ That is the capability your team should optimize for.
 If you execute the core workflow well, you will have three things judges can evaluate directly: a working scientific data pipeline, a meaningful application of Grok-powered agents, and an intuitive product that communicates its findings clearly.
 
 One final question that would materially change this plan: how long is your SpaceX hackathon, and are you required to use the actual Grok Bots product, or can you build with the Grok API? Those two details determine how much agent orchestration to attempt and which features should be prioritized.
+
+18. Working in parallel without breaking each other
+Three people pushing at different times is normal. Git only conflicts when two people change the same lines of the same file, and the app only crashes at integration when someone breaks the shared contract. The repository is set up so neither should happen if everyone follows these rules.
+Rule 1 — Only edit files you own
+Owner	Files you may edit freely
+Person 1	data/, analysis/, tests/test_anomalies.py
+Person 2	agents/, tests/test_agents.py
+Person 3	app.py, translator.py, config.py, dashboard/, tests/conftest.py, tests/test_translator.py, tests/test_app.py
+Whole team	schemas/, sample_data/, requirements.txt, tests/test_contracts.py, plan.md, README.md
+
+Every file starts with an "Owner:" line. If you need a change in someone else's file, ask them to make it. You can add new files inside your own folders at any time; new files never conflict.
+Rule 2 — Shared files change only by agreement
+For schemas/, sample_data/ or requirements.txt:
+1. Announce the change in the team chat and wait for a thumbs-up.
+2. One person makes the change. If a schema changes, update sample_data/ in the same commit.
+3. Run pytest, push, and tell the team.
+4. Everyone runs git pull --rebase origin main right away.
+For requirements.txt, add one library per line. If it conflicts, keep both sides' lines.
+Rule 3 — Never change the entry functions' names or signatures
+The app reaches each workstream through exactly one function:
+- Person 1: analysis/anomaly_detection.py → detect_anomalies() -> list[AnomalyRecord]
+- Person 1: data/climate_sources.py → get_sst_series(region) -> DataFrame with columns date, value
+- Person 2: agents/workflow.py → run_investigation(anomaly, on_progress) -> Assessment
+While a function still raises NotImplementedError, translator.py automatically uses sample_data/ and the dashboard shows a SAMPLE DATA banner. When you implement your function, your banner disappears with no change to anyone else's code.
+
+If your function cannot produce a real result (API down, missing data), raise an exception. Never return invented values. translator.py turns the exception into a readable error in the UI instead of a crash.
+
+Person 2: call on_progress(ProgressEvent(...)) at each real agent step so the Investigation timeline shows genuine progress.
+Rule 4 — Git workflow
+Each person works on their own branch and merges small, working pieces into main often.
+
+git checkout main
+git pull --rebase origin main
+git checkout -b p1-climate        # p2-agents / p3-dashboard
+
+# ...work...
+git add <your files>
+git commit -m "Short description"
+git pull --rebase origin main     # pick up teammates' work before every push
+pytest                            # must pass
+git push origin p1-climate
+# open a pull request into main; merge when CI is green
+
+- Commit small and often, at least every hour.
+- Pull from main at least every 1–2 hours so you never drift far behind.
+- Never force-push to main. Never commit .env or API keys.
+- Use git add <your files> rather than git add . so you don't accidentally commit someone else's half-finished work or secrets.
+Rule 5 — Keep CI green
+.github/workflows/tests.yml runs pytest on every push and pull request. Don't merge a red pull request. The tests already check:
+- Sample data matches the shared schemas (catches someone changing a schema alone).
+- The translator rejects bad ids, unknown regions, malformed backend output and crashes, converting them into TranslatorError.
+- The Streamlit app renders and runs an investigation without throwing, even when a backend function crashes.
+Person 1 and Person 2 add their own tests to their own test files.
+If you do hit a merge conflict
+1. Don't panic, and don't delete the other person's work.
+2. Open the file and find the <<<<<<<, =======, >>>>>>> markers.
+3. Keep both sides' intent, remove the markers, and run pytest.
+4. git add <file>, then git rebase --continue.
+5. If the file isn't yours, ask its owner to resolve it with you.
+What the setup prevents
+Mechanism	Prevents
+One owner per folder	Two people editing the same lines
+Shared schemas + contract tests	Silent contract changes that crash integration
+translator.py as the only bridge	The UI depending on backend internals
+Sample-data fallback	Being blocked waiting for a teammate
+TranslatorError + error states in the UI	Stack traces during the demo
+.gitattributes line-ending rules	Whole-file diffs between Windows and macOS
+.env.example + .gitignore	Leaked API keys
+CI on every push	Broken code reaching main
+
+Integration order
+1. Person 1 implements detect_anomalies() and get_sst_series(). The Anomalies and Observations banners disappear.
+2. Person 2 implements run_investigation(). The Assessment banner disappears.
+3. Person 3 polishes the UI throughout, using sample data until real data arrives.
+4. Demo-ready means no SAMPLE DATA banners and CI green on main.
