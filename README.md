@@ -44,16 +44,27 @@ and [IPCC AR6 climate extremes assessment](https://www.ipcc.ch/report/ar6/wg1/ch
 
 ## Setup
 
+Requires Python 3.11 or newer (CI and the verified setup use 3.11).
+
 ```powershell
-uv venv --python 3.12 .venv
-uv pip install --python .venv\Scripts\python.exe -r requirements.txt
-.venv\Scripts\streamlit.exe run app.py
-.venv\Scripts\python.exe -m pytest -q
+python -m venv .venv
+.venv\Scripts\activate            # macOS/Linux: source .venv/bin/activate
+pip install -r requirements.txt
+copy .env.example .env            # macOS/Linux: cp .env.example .env
+streamlit run app.py
+python -m pytest -q
 ```
 
-Alternatively, create a Python virtual environment with `python -m venv .venv`
-and install `requirements.txt` with pip. Future Grok integration uses the settings
-in `.env.example`; the climate data and statistical assessments need no API key.
+The climate data and statistical assessments need no API key. Grok investigations
+need `XAI_API_KEY` and `XAI_MODEL` in `.env` (see `.env.example`) and credits on the
+**xAI** account at console.x.ai. Cursor credits and the X (Twitter) developer API
+are separate products and cannot be used. To verify your setup:
+
+```powershell
+python -m agents.live_check --tools   # real data sources, no key needed
+python -m agents.live_check           # Grok access and structured output
+python -m agents.live_check --full    # full four-bot investigation (spends credits)
+```
 
 ## Worldwide monitoring
 
@@ -112,12 +123,45 @@ Place search: [Open-Meteo geocoding](https://open-meteo.com/en/docs/geocoding-ap
 Country/territory names: [GeoNames](https://download.geonames.org/export/dump/countryInfo.txt).
 Weather and GeoNames attribution: CC BY 4.0. Country names/codes follow that source.
 
+## Deployment
+
+EarthWatch is a Streamlit app, so it needs a host that keeps a server running.
+**Streamlit Community Cloud** is the quickest option; Render, Railway and Fly.io
+also work. Vercel's serverless functions cannot run Streamlit.
+
+1. Merge everything to `main`, then create the app at share.streamlit.io (repo,
+   branch `main`, main file `app.py`, Python 3.11 or newer).
+2. Under **Settings > Secrets**, add (never commit these):
+
+   ```toml
+   XAI_API_KEY = "your-xai-key"
+   XAI_MODEL = "grok-4.7"
+   EARTHWATCH_ACCESS_CODE = "choose-a-passphrase"
+   EARTHWATCH_MAX_INVESTIGATIONS = "40"
+   ```
+
+3. Open the app from a different device and run each view once before presenting.
+
+| Setting | Purpose | Default |
+|---|---|---|
+| `XAI_API_KEY`, `XAI_MODEL` | Grok access. Key and credits must be on the same xAI team. | required for investigations |
+| `EARTHWATCH_ACCESS_CODE` | Shows a login form first. Wrong guesses are limited across all visitors. | off (open) |
+| `EARTHWATCH_MAX_INVESTIGATIONS` | Caps real Grok jobs per server run (each investigation, hazard-globe review, seasonal watch or weather brief counts as one); `0` removes the cap. Resets on restart. | 60 |
+| `EARTHWATCH_CACHE_DIR` | Where downloaded data is cached. Use `/tmp/earthwatch` on read-only hosts. | `.cache/earthwatch` |
+
+Every Grok job spends xAI credits. The hazard-globe view also refreshes NOAA every
+30 minutes while open and sends changed events to Grok in the background, so for a
+public link set the access code and the cap, turn off **Automatic updates** in that
+view if you do not need them, and also set a spending limit in the xAI console. The first load of a
+new place downloads data and can take a minute; open the app before presenting.
+
 ## Team integration
 
 Person 1 owns `data/` and `analysis/`; Person 2 owns `agents/`; Person 3 owns
 `app.py`, `translator.py`, and `dashboard/`. The worldwide expansion connects all
 three interfaces and keeps the original Pacific entry points compatible. The
-shared AnomalyRecord and Assessment schemas are unchanged. Agent implementations
+shared AnomalyRecord schema is unchanged, and Assessment gained one optional
+field, `action_plan` (the Action Bot's alert, report and contingency plan). Agent implementations
 must use the selected record's region, coordinates, date and source, rather than
 assuming Peru or interpreting Pacific indices as local SST everywhere.
 

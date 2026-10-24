@@ -46,7 +46,9 @@ def run_investigation(
     client: ChatClient | None = None,
     toolbox: AgentToolbox | None = None,
 ) -> Assessment:
-    client = client or GrokClient()
+    if client is None:
+        # Building the real client counts against the deployment's cap.
+        client = GrokClient()
     if toolbox is None and is_live_weather(anomaly):
         from agents.live_tools import LiveWeatherToolbox
         from data.locations import Location

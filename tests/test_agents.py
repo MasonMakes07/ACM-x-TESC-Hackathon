@@ -6,7 +6,10 @@ all faked, so these tests never touch the network and cost nothing.
 
 import inspect
 import json
+import re
+import threading
 from datetime import date
+from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import urlparse
 
@@ -17,8 +20,12 @@ import requests
 from pydantic import ValidationError
 
 import translator
-from agents import briefing, prompts, provenance, workflow
-from agents.agent_errors import AgentOutputError, GrokError
+from agents import briefing, budget, prompts, provenance, workflow
+from agents import global_hazards as hazard_review
+from agents import investigator as investigator_module
+from agents import regional_impact as impact_module
+from agents import seasonal_watch
+from agents.agent_errors import AgentOutputError, BudgetExceededError, GrokError
 from agents.context import build_context, infer_as_of_date
 from agents.agent_models import (
     AgentEvidence,
@@ -28,11 +35,13 @@ from agents.agent_models import (
 )
 from agents.grok_client import GrokClient
 from agents.ledger import EvidenceLedger, LedgerSource
+from agents.live_tools import LIVE_TOOL_NAMES, LiveWeatherToolbox
 from agents.runner import extract_json, run_agent
 from agents.sentinel import monitor, same_sign_run
 from agents.skeptic import review
 from agents.toolbox import MAX_TEXT_CHARS, OFFICIAL_SOURCES, AgentToolbox
 from data import climate_sources, rainfall_sources, weather_sources
+from data.locations import Location
 from schemas.anomaly import AnomalyRecord
 from schemas.assessment import Assessment
 from schemas.errors import TranslatorError
@@ -2004,3 +2013,302 @@ def test_duplicate_claims_with_different_source_wording_are_merged():
         rainfall_claim(claim, "Open-Meteo Piura daily precipitation"),
     ]
     assert len(provenance.verify_evidence(items, ledger)) == 1
+
+
+# =============================================================================
+# Investigation budget (spending guard for deployments)
+# =============================================================================
+
+# Gives every test a fresh process-wide budget that re-reads the environment.
+@pytest.fixture(autouse=True)
+def fresh_budget(monkeypatch):
+    monkeypatch.delenv(budget.ENV_NAME, raising=False)
+    budget.reset_budget()
+    yield
+    budget.reset_budget()
+
+
+# Checks a budget allows exactly its limit and then refuses with a clear message.
+def test_budget_allows_limit_then_refuses():
+    small_budget = budget.InvestigationBudget(2)
+    small_budget.claim()
+    small_budget.claim()
+    assert small_budget.remaining == 0
+    with pytest.raises(BudgetExceededError, match="limit of 2"):
+        small_budget.claim()
+    assert small_budget.used == 2
+
+
+# Checks an unlimited budget never refuses.
+def test_unlimited_budget_never_refuses():
+    unlimited = budget.InvestigationBudget(None)
+    for _ in range(500):
+        unlimited.claim()
+    assert unlimited.remaining is None
+
+
+# Checks the cap setting is parsed safely and falls back to the default.
+@pytest.mark.parametrize(
+    ("raw_value", "expected"),
+    [
+        (None, budget.DEFAULT_MAX_INVESTIGATIONS),
+        ("", budget.DEFAULT_MAX_INVESTIGATIONS),
+        ("   ", budget.DEFAULT_MAX_INVESTIGATIONS),
+        ("5", 5),
+        (" 7 ", 7),
+        ("0", None),
+        ("abc", budget.DEFAULT_MAX_INVESTIGATIONS),
+        ("-3", budget.DEFAULT_MAX_INVESTIGATIONS),
+        ("2.5", budget.DEFAULT_MAX_INVESTIGATIONS),
+    ],
+)
+def test_read_limit(raw_value, expected):
+    assert budget.read_limit(raw_value) == expected
+
+
+# Checks many simultaneous visitors cannot slip past the cap.
+def test_budget_is_thread_safe():
+    shared = budget.InvestigationBudget(20)
+    outcomes = []
+
+    # Tries to claim once and records whether it was allowed.
+    def try_claim():
+        try:
+            shared.claim()
+            outcomes.append(True)
+        except BudgetExceededError:
+            outcomes.append(False)
+
+    threads = [threading.Thread(target=try_claim) for _ in range(80)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert sum(outcomes) == 20
+    assert shared.used == 20
+
+
+# Checks the cap is read from the environment when first used.
+def test_budget_reads_environment(monkeypatch):
+    monkeypatch.setenv(budget.ENV_NAME, "3")
+    assert budget.get_budget().limit == 3
+
+
+# Sets dummy credentials so a real GrokClient can be built without contacting xAI.
+@pytest.fixture
+def dummy_credentials(monkeypatch):
+    monkeypatch.setenv("XAI_API_KEY", "test-key")
+    monkeypatch.setenv("XAI_MODEL", "grok-test")
+
+
+# Checks every real client connection uses one unit of the cap, then is refused.
+def test_real_clients_use_the_cap(dummy_credentials, monkeypatch):
+    monkeypatch.setattr(budget, "_budget", budget.InvestigationBudget(2))
+    GrokClient()
+    GrokClient()
+    with pytest.raises(BudgetExceededError):
+        GrokClient()
+    assert budget.get_budget().used == 2
+
+
+# Checks clients with an injected session (tests, offline demos) never count.
+def test_injected_session_does_not_use_the_cap(monkeypatch):
+    monkeypatch.setattr(budget, "_budget", budget.InvestigationBudget(1))
+    for _ in range(3):
+        make_grok_client(FakeSession([]))
+    assert budget.get_budget().used == 0
+
+
+# Checks injected fake agents (tests) never count against the cap either.
+def test_injected_clients_do_not_use_the_cap(
+    anomaly, toolbox, working_data, monkeypatch
+):
+    monkeypatch.setattr(budget, "_budget", budget.InvestigationBudget(1))
+    for _ in range(3):
+        fresh_toolbox = AgentToolbox(
+            EvidenceLedger(), ANOMALY_DATE, http_get=make_http_get(),
+            today=CONTEMPORARY_TODAY,
+        )
+        run_with_fakes(anomaly, happy_path_client(), fresh_toolbox)
+    assert budget.get_budget().used == 0
+
+
+# Checks a missing API key fails first and does not consume the cap.
+def test_missing_key_does_not_consume_the_cap(monkeypatch):
+    monkeypatch.delenv("XAI_API_KEY", raising=False)
+    monkeypatch.setattr(budget, "_budget", budget.InvestigationBudget(1))
+    with pytest.raises(RuntimeError, match="XAI_API_KEY"):
+        GrokClient(model="grok-test")
+    assert budget.get_budget().used == 0
+
+
+# Checks real investigations are capped end to end, before any further Grok call.
+def test_real_investigations_are_capped(
+    anomaly, toolbox, working_data, dummy_credentials, monkeypatch
+):
+    monkeypatch.setattr(budget, "_budget", budget.InvestigationBudget(1))
+    scripted = happy_path_client()
+    # Routes the real client's network call to the scripted fake.
+    monkeypatch.setattr(
+        GrokClient,
+        "chat",
+        lambda self, messages, tools=None: scripted.chat(messages, tools),
+    )
+    workflow.run_investigation(anomaly, lambda event: None, toolbox=toolbox)
+    calls_after_first = len(scripted.calls)
+    with pytest.raises(BudgetExceededError):
+        workflow.run_investigation(anomaly, lambda event: None, toolbox=toolbox)
+    assert len(scripted.calls) == calls_after_first
+
+
+# Checks the hazard-globe and seasonal-watch bots are refused once the cap is spent
+# (the weather brief builds its client the same way, covered by the static check).
+def test_other_grok_paths_are_capped(dummy_credentials, monkeypatch):
+    spent = budget.InvestigationBudget(1)
+    spent.claim()
+    monkeypatch.setattr(budget, "_budget", spent)
+    with pytest.raises(BudgetExceededError):
+        hazard_review.review_hazards(None, [], lambda agent, message: None)
+    with pytest.raises(BudgetExceededError):
+        seasonal_watch.assess_seasonal(None, lambda event: None)
+
+
+# Checks no module talks to the xAI API except through the capped GrokClient.
+def test_only_grok_client_reaches_xai():
+    agents_folder = Path(__file__).resolve().parent.parent / "agents"
+    for module_file in agents_folder.glob("*.py"):
+        if module_file.name == "grok_client.py":
+            continue
+        source = module_file.read_text(encoding="utf-8")
+        assert "chat/completions" not in source, module_file.name
+        assert "api.x.ai" not in source, module_file.name
+
+
+# Checks the Translator shows the cap message to users instead of a vague failure.
+def test_translator_shows_budget_message(stubbed_backend):
+    message = "This deployment has reached its limit of 5 investigations."
+
+    # Raises the budget error like a capped deployment would.
+    def capped(anomaly_record, on_progress):
+        raise BudgetExceededError(message)
+
+    stubbed_backend.setattr(translator.workflow, "run_investigation", capped)
+    with pytest.raises(TranslatorError) as error_info:
+        translator.investigate_anomaly("sample_nino12_001", lambda event: None)
+    assert str(error_info.value) == message
+
+
+# =============================================================================
+# Wiring: prompts, offered tools and handlers must agree
+# =============================================================================
+
+TOOL_NAME_PATTERN = re.compile(r"\b(get_[a-z_]+|fetch_[a-z_]+)\b")
+
+
+# Lists every (label, system prompt, offered tools, toolbox kind) combination.
+def prompt_tool_combinations():
+    combos = []
+    for profile in ("pacific", "local", "unknown"):
+        combos.append((
+            f"investigator/{profile}",
+            investigator_module.PROMPT_BY_PROFILE[profile],
+            investigator_module.TOOLS_BY_PROFILE[profile],
+            "standard",
+        ))
+        combos.append((
+            f"impact/{profile}",
+            impact_module.PROMPT_BY_PROFILE[profile],
+            impact_module.TOOLS_BY_PROFILE[profile],
+            "standard",
+        ))
+    combos.append(
+        ("investigator/live", prompts.LIVE_INVESTIGATOR_PROMPT, LIVE_TOOL_NAMES, "live")
+    )
+    combos.append(("impact/live", prompts.LIVE_IMPACT_PROMPT, LIVE_TOOL_NAMES, "live"))
+    return combos
+
+
+# Checks no prompt tells a bot to use a tool that bot is not actually offered.
+@pytest.mark.parametrize(
+    ("label", "prompt", "offered", "kind"),
+    prompt_tool_combinations(),
+    ids=[combo[0] for combo in prompt_tool_combinations()],
+)
+def test_prompts_only_mention_offered_tools(label, prompt, offered, kind):
+    mentioned = set(TOOL_NAME_PATTERN.findall(prompt))
+    unoffered = mentioned - set(offered)
+    assert not unoffered, f"{label} mentions unoffered tools: {unoffered}"
+
+
+# Checks every offered tool has a definition and a handler that is not "unknown".
+@pytest.mark.parametrize(
+    ("label", "prompt", "offered", "kind"),
+    prompt_tool_combinations(),
+    ids=[combo[0] for combo in prompt_tool_combinations()],
+)
+def test_offered_tools_have_definitions_and_handlers(label, prompt, offered, kind):
+    if kind == "live":
+        box = LiveWeatherToolbox(
+            EvidenceLedger(), date.today(), Location("Test", 1.0, 2.0)
+        )
+    else:
+        box = AgentToolbox(EvidenceLedger(), ANOMALY_DATE)
+    if offered:
+        assert len(box.definitions(tuple(offered))) == len(offered)
+    for tool_name in offered:
+        reply = box.execute(tool_name, "{}")
+        assert "Unknown tool" not in reply
+        assert "Only location-bound" not in reply
+
+
+# Checks a record with no usable region is told plainly that no tools exist.
+def test_no_data_prompts_say_no_tools_are_available():
+    for prompt in (prompts.NO_DATA_INVESTIGATOR_PROMPT, prompts.NO_DATA_IMPACT_PROMPT):
+        assert "NO data tools" in prompt
+        assert not TOOL_NAME_PATTERN.findall(prompt)
+
+
+# Checks every setting the code reads is documented in the .env template.
+def test_every_setting_is_documented():
+    template = (Path(__file__).resolve().parent.parent / ".env.example").read_text(
+        encoding="utf-8"
+    )
+    for setting in (
+        "XAI_API_KEY",
+        "XAI_MODEL",
+        "XAI_BASE_URL",
+        "EARTHWATCH_ACCESS_CODE",
+        "EARTHWATCH_MAX_INVESTIGATIONS",
+        "EARTHWATCH_CACHE_DIR",
+    ):
+        assert setting in template
+
+
+# Checks a URL written in the source field matches a retrieved source's exact URL.
+def test_ledger_matches_url_written_as_the_source():
+    ledger = EvidenceLedger()
+    url = "https://api.weather.gov/stations/KBFI/observations/latest"
+    ledger.record_source(
+        LedgerSource("NOAA NWS KBFI station observation", "measurement", url)
+    )
+    assert ledger.find(url) is not None
+    assert ledger.find(url + "/") is not None
+    assert ledger.find(url.upper()) is not None
+    other_station = "https://api.weather.gov/stations/KSEA/observations/latest"
+    assert ledger.find(other_station) is None
+    assert ledger.find("https://api.weather.gov/stations/KBFI") is None
+    assert ledger.find("https://evil.example/" + url) is None
+
+
+# Checks a fabricated URL in the source field is still downgraded to uncertain.
+def test_fabricated_url_source_is_uncertain():
+    ledger = EvidenceLedger()
+    known_url = "https://api.weather.gov/a"
+    ledger.record_source(LedgerSource("NOAA NWS KBFI", "measurement", known_url))
+    real = rainfall_claim("Real", known_url)
+    fake = rainfall_claim("Fake", "https://api.weather.gov/zzz")
+    results = provenance.verify_evidence([real, fake], ledger)
+    verified = {item.claim: item for item in results}
+    assert verified["Real"].evidence_type == "measured"
+    assert verified["Real"].url == "https://api.weather.gov/a"
+    assert verified["Fake"].evidence_type == "uncertain"

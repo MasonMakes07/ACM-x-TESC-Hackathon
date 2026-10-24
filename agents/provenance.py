@@ -98,7 +98,11 @@ def observation_evidence(anomaly: AnomalyRecord) -> EvidenceItem:
         source=anomaly.source,
         source_date=anomaly.observation_date,
         evidence_type="reported" if is_live_weather(anomaly) else "measured",
-        limitations='Current weather-model estimate, not a station observation.' if is_live_weather(anomaly) else None,
+        limitations=(
+            "Current weather-model estimate, not a station observation."
+            if is_live_weather(anomaly)
+            else None
+        ),
     )
 
 

@@ -46,14 +46,25 @@ class EvidenceLedger:
         if entry not in self.unavailable:
             self.unavailable.append(entry)
 
+    # Returns the retrieved source whose URL exactly equals the given text, if any.
+    def _find_by_url(self, text: str | None) -> LedgerSource | None:
+        cited = (text or "").strip().rstrip("/").lower()
+        if not cited.startswith(("http://", "https://")):
+            return None
+        for source in self.sources:
+            if source.url and source.url.strip().rstrip("/").lower() == cited:
+                return source
+        return None
+
     # Returns the ledger source matching a cited name or URL, if any.
+    # A URL written in the "source" field counts only on an exact URL match.
     def find(
         self, cited_source: str, cited_url: str | None = None
     ) -> LedgerSource | None:
-        if cited_url:
-            for source in self.sources:
-                if source.url and source.url == cited_url:
-                    return source
+        for candidate in (cited_url, cited_source):
+            match = self._find_by_url(candidate)
+            if match is not None:
+                return match
         cited = cited_source.strip().lower()
         if len(cited) < MIN_MATCH_LENGTH:
             return None

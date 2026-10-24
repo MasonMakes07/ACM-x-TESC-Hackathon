@@ -20,3 +20,12 @@ class GrokError(Exception):
 # Raised when an agent cannot produce valid structured output after one repair.
 class AgentOutputError(Exception):
     pass
+
+
+# =============================================================================
+# BudgetExceededError
+# =============================================================================
+
+# Raised when the deployment's investigation limit has been reached (safe to show).
+class BudgetExceededError(Exception):
+    pass

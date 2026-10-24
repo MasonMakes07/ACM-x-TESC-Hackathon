@@ -7,7 +7,11 @@ import json
 
 from agents.agent_models import InvestigationReport
 from agents.context import AnomalyContext, build_context, is_live_weather
-from agents.prompts import INVESTIGATOR_PROMPT, LOCAL_INVESTIGATOR_PROMPT
+from agents.prompts import (
+    INVESTIGATOR_PROMPT,
+    LOCAL_INVESTIGATOR_PROMPT,
+    NO_DATA_INVESTIGATOR_PROMPT,
+)
 from agents.runner import ChatClient, ProgressCallback, emit, run_agent
 from agents.toolbox import AgentToolbox
 from schemas.anomaly import AnomalyRecord
@@ -25,7 +29,7 @@ TOOLS_BY_PROFILE = {
 PROMPT_BY_PROFILE = {
     "pacific": INVESTIGATOR_PROMPT,
     "local": LOCAL_INVESTIGATOR_PROMPT,
-    "unknown": LOCAL_INVESTIGATOR_PROMPT,
+    "unknown": NO_DATA_INVESTIGATOR_PROMPT,
 }
 
 

@@ -11,6 +11,7 @@ import requests
 
 import config
 from agents.agent_errors import GrokError
+from agents.budget import claim_investigation
 
 DEFAULT_BASE_URL = "https://api.x.ai/v1"
 RETRYABLE_STATUS_CODES = frozenset({408, 429, 500, 502, 503, 504})
@@ -36,6 +37,10 @@ class GrokClient:
     ) -> None:
         self.api_key = api_key or config.get_required_env("XAI_API_KEY")
         self.model = model or config.get_required_env("XAI_MODEL")
+        if session is None:
+            # A real connection spends xAI credits, so it counts against the
+            # deployment's cap. Injected sessions (tests, offline demos) do not.
+            claim_investigation()
         root_url = base_url or os.getenv("XAI_BASE_URL") or DEFAULT_BASE_URL
         self.endpoint = root_url.rstrip("/") + "/chat/completions"
         self.timeout_seconds = timeout_seconds

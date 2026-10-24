@@ -23,7 +23,7 @@ from analysis import anomaly_detection
 from data import climate_sources
 from schemas.anomaly import SERIES_COLUMNS, AnomalyRecord
 from schemas.assessment import Assessment, ProgressEvent
-from agents.agent_errors import AgentOutputError, GrokError
+from agents.agent_errors import AgentOutputError, BudgetExceededError, GrokError
 from schemas.errors import TranslatorError
 
 logger = logging.getLogger(__name__)
@@ -106,6 +106,8 @@ def load_observation_series(region: str) -> tuple[pd.DataFrame, bool]:
 
 # Explains why an investigation failed in words the user can act on (never includes secrets).
 def _failure_reason(error: Exception, fallback: str) -> str:
+    if isinstance(error, BudgetExceededError):
+        return str(error)
     if isinstance(error, GrokError):
         return f"{fallback} The Grok service said: {str(error)[:300]}"
     if isinstance(error, AgentOutputError):
@@ -264,7 +266,7 @@ def investigate_live_weather(weather, station, on_progress):
         raise
     except Exception as error:
         logger.error('Live Grok investigation failed: %s',type(error).__name__)
-        raise TranslatorError('The live Grok investigation failed. Check the API settings and credits, then retry.') from error
+        raise TranslatorError(_failure_reason(error, 'The live Grok investigation failed. Check the API settings and credits, then retry.')) from error
 
 
 def investigate_location(climate, anomaly_id, on_progress):
